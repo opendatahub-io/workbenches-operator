@@ -30,6 +30,10 @@ help: ## Display this help.
 
 ##@ Development
 
+.PHONY: manifests-fetch
+manifests-fetch: ## Fetch upstream component manifests into opt/manifests/ for local development.
+	bash get_all_manifests.sh
+
 .PHONY: manifests
 manifests: controller-gen ## Generate WebhookConfiguration, ClusterRole and CustomResourceDefinition objects.
 	$(CONTROLLER_GEN) rbac:roleName=manager-role crd webhook paths="./..." output:crd:artifacts:config=config/crd/bases output:rbac:artifacts:config=config/rbac

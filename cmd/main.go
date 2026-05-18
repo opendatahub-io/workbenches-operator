@@ -20,6 +20,7 @@ package main
 import (
 	"crypto/tls"
 	"flag"
+	"fmt"
 	"os"
 
 	"k8s.io/apimachinery/pkg/runtime"
@@ -53,6 +54,7 @@ func main() {
 		probeAddr            string
 		secureMetrics        bool
 		enableHTTP2          bool
+		manifestsBasePath    string
 	)
 
 	flag.StringVar(&metricsAddr, "metrics-bind-address", "0", "The address the metrics endpoint binds to. "+
@@ -65,6 +67,8 @@ func main() {
 		"If set, the metrics endpoint is served securely via HTTPS. Use --metrics-secure=false to use HTTP instead.")
 	flag.BoolVar(&enableHTTP2, "enable-http2", false,
 		"If set, HTTP/2 will be enabled for the metrics and webhook servers.")
+	flag.StringVar(&manifestsBasePath, "manifests-base-path", "/opt/manifests",
+		"Base path for component manifests.")
 
 	opts := zap.Options{
 		Development: true,
@@ -73,6 +77,17 @@ func main() {
 	flag.Parse()
 
 	ctrl.SetLogger(zap.New(zap.UseFlagOptions(&opts)))
+
+	info, err := os.Stat(manifestsBasePath)
+	if err != nil {
+		setupLog.Error(err, "invalid manifests-base-path", "path", manifestsBasePath)
+		os.Exit(1)
+	}
+
+	if !info.IsDir() {
+		setupLog.Error(fmt.Errorf("path exists but is not a directory"), "invalid manifests-base-path", "path", manifestsBasePath)
+		os.Exit(1)
+	}
 
 	var tlsOpts []func(*tls.Config)
 
@@ -110,8 +125,9 @@ func main() {
 	}
 
 	if err = (&controller.WorkbenchesReconciler{
-		Client: mgr.GetClient(),
-		Scheme: mgr.GetScheme(),
+		Client:            mgr.GetClient(),
+		Scheme:            mgr.GetScheme(),
+		ManifestsBasePath: manifestsBasePath,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "Workbenches")
 		os.Exit(1)
