@@ -1,0 +1,9 @@
+apiVersion: components.platform.opendatahub.io/v1alpha1
+kind: Workbenches
+metadata:
+  name: default
+spec:
+  managementState: Managed
+  workbenchNamespace: opendatahub
+  # Possible values: OpenDataHub, SelfManagedRhoai
+  platform: OpenDataHub
