@@ -9,24 +9,6 @@ rules:
   resources:
   - workbenches
   verbs:
-  - create
-  - delete
   - get
   - list
-  - patch
-  - update
   - watch
-- apiGroups:
-  - components.platform.opendatahub.io
-  resources:
-  - workbenches/finalizers
-  verbs:
-  - update
-- apiGroups:
-  - components.platform.opendatahub.io
-  resources:
-  - workbenches/status
-  verbs:
-  - get
-  - patch
-  - update
