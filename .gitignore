@@ -15,7 +15,6 @@ testbin/
 go-junit-report.xml
 
 # Kubernetes Generated files - skip generated files
-zz_generated.*
 
 # editor and IDE paraphernalia
 .idea
