@@ -50,19 +50,10 @@ type WorkbenchesSpec struct {
 	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="workbenchNamespace is immutable"
 	WorkbenchNamespace string `json:"workbenchNamespace,omitempty"`
 
-	// gatewayDomain is the domain for the data science gateway.
-	// Projected by the orchestrator from the platform GatewayConfig.
-	// +kubebuilder:validation:MaxLength=253
-	GatewayDomain string `json:"gatewayDomain,omitempty"`
-
 	// platform identifies the platform type (OpenDataHub, SelfManagedRhoai).
 	// Projected by the orchestrator.
 	// +kubebuilder:validation:Enum=OpenDataHub;SelfManagedRhoai
 	Platform string `json:"platform,omitempty"`
-
-	// mlflowEnabled indicates whether the MLflow integration is active.
-	// Projected by the orchestrator from DSC MLflowOperator state.
-	MLflowEnabled bool `json:"mlflowEnabled,omitempty"`
 }
 
 // ComponentRelease tracks release metadata for a deployed component.
