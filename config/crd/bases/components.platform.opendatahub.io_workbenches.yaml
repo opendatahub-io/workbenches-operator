@@ -62,6 +62,14 @@ spec:
                 default: Managed
                 description: |-
                   managementState indicates whether this component should be managed by the operator.
+                  Set to one of the following values:
+
+                  - "Managed" : the operator is actively managing the component and trying to keep it active.
+                                It will only upgrade the component if it is safe to do so
+
+                  - "Removed" : the operator is actively managing the component and will not install it,
+                                or if it is installed, the operator will try to remove it
+
                   Valid values are "Managed" and "Removed".
                 enum:
                 - Managed
@@ -176,8 +184,13 @@ spec:
                       type: string
                     version:
                       type: string
+                  required:
+                  - name
                   type: object
                 type: array
+                x-kubernetes-list-map-keys:
+                - name
+                x-kubernetes-list-type: map
               workbenchNamespace:
                 description: workbenchNamespace reflects the active workbench namespace.
                 type: string

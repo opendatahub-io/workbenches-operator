@@ -30,6 +30,14 @@ const (
 // WorkbenchesSpec defines the desired state of Workbenches.
 type WorkbenchesSpec struct {
 	// managementState indicates whether this component should be managed by the operator.
+	// Set to one of the following values:
+	//
+	// - "Managed" : the operator is actively managing the component and trying to keep it active.
+	//               It will only upgrade the component if it is safe to do so
+	//
+	// - "Removed" : the operator is actively managing the component and will not install it,
+	//               or if it is installed, the operator will try to remove it
+	//
 	// Valid values are "Managed" and "Removed".
 	// +kubebuilder:default=Managed
 	// +kubebuilder:validation:Enum=Managed;Removed
@@ -59,7 +67,9 @@ type WorkbenchesSpec struct {
 
 // ComponentRelease tracks release metadata for a deployed component.
 type ComponentRelease struct {
-	Name    string `json:"name,omitempty"`
+	// +required
+	// +kubebuilder:validation:Required
+	Name    string `json:"name"`
 	Version string `json:"version,omitempty"`
 	RepoURL string `json:"repoUrl,omitempty"`
 }
@@ -72,6 +82,10 @@ type WorkbenchesStatus struct {
 	Conditions []metav1.Condition `json:"conditions,omitempty"`
 
 	// releases tracks the deployed component versions.
+	// +patchMergeKey=name
+	// +patchStrategy=merge
+	// +listType=map
+	// +listMapKey=name
 	Releases []ComponentRelease `json:"releases,omitempty"`
 
 	// observedGeneration is the most recent generation observed by the controller.
