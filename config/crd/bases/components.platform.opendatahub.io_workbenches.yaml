@@ -52,6 +52,12 @@ spec:
           spec:
             description: WorkbenchesSpec defines the desired state of Workbenches.
             properties:
+              gatewayDomain:
+                description: |-
+                  gatewayDomain is the domain for the data science gateway.
+                  Projected by the orchestrator from the platform GatewayConfig.
+                maxLength: 253
+                type: string
               managementState:
                 default: Managed
                 description: |-
@@ -69,6 +75,11 @@ spec:
                 - Managed
                 - Removed
                 type: string
+              mlflowEnabled:
+                description: |-
+                  mlflowEnabled indicates whether the MLflow integration is active.
+                  Projected by the orchestrator from DSC MLflowOperator state.
+                type: boolean
               platform:
                 description: |-
                   platform identifies the platform type (OpenDataHub, SelfManagedRhoai).
