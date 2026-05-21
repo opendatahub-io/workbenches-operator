@@ -319,7 +319,7 @@ func (r *WorkbenchesReconciler) cleanupManagedResources(ctx context.Context, nam
 		list.SetGroupVersionKind(gvk)
 
 		if err := r.List(ctx, list, client.InNamespace(namespace), componentLabel); err != nil {
-			l.V(1).Info("skipping GVK during cleanup (list failed)", "gvk", gvk, "error", err)
+			l.Info("skipping GVK during cleanup (list failed)", "gvk", gvk, "error", err)
 
 			continue
 		}
@@ -339,7 +339,7 @@ func (r *WorkbenchesReconciler) cleanupManagedResources(ctx context.Context, nam
 		list.SetGroupVersionKind(gvk)
 
 		if err := r.List(ctx, list, componentLabel); err != nil {
-			l.V(1).Info("skipping cluster GVK during cleanup (list failed)", "gvk", gvk, "error", err)
+			l.Info("skipping cluster GVK during cleanup (list failed)", "gvk", gvk, "error", err)
 
 			continue
 		}
