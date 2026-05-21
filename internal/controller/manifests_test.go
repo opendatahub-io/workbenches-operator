@@ -726,24 +726,26 @@ func TestRenderRealManifests(t *testing.T) {
 			}
 
 			for _, group := range groups {
-				srcDir := filepath.Join(basePath, group)
+				t.Run(filepath.Base(group), func(t *testing.T) {
+					srcDir := filepath.Join(basePath, group)
 
-				if _, statErr := os.Stat(srcDir); os.IsNotExist(statErr) {
-					t.Skipf("manifest group directory does not exist: %s", srcDir)
-				}
+					if _, statErr := os.Stat(srcDir); os.IsNotExist(statErr) {
+						t.Fatalf("manifest group directory does not exist: %s", srcDir)
+					}
 
-				renderDir := filepath.Join(workDir, group)
+					renderDir := filepath.Join(workDir, group)
 
-				objects, err := renderKustomize(renderDir, params)
-				if err != nil {
-					t.Fatalf("renderKustomize(%s) failed: %v", group, err)
-				}
+					objects, err := renderKustomize(renderDir, params)
+					if err != nil {
+						t.Fatalf("renderKustomize(%s) failed: %v", group, err)
+					}
 
-				if len(objects) == 0 {
-					t.Errorf("renderKustomize(%s) produced 0 objects", group)
-				}
+					if len(objects) == 0 {
+						t.Errorf("renderKustomize(%s) produced 0 objects", group)
+					}
 
-				t.Logf("  %s: rendered %d objects", group, len(objects))
+					t.Logf("rendered %d objects", len(objects))
+				})
 			}
 		})
 	}
