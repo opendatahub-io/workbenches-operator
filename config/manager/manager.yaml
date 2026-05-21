@@ -75,6 +75,7 @@ spec:
             memory: 128Mi
       volumes:
       - name: tmp
-        emptyDir: {}
+        emptyDir:
+          sizeLimit: 256Mi
       serviceAccountName: controller-manager
       terminationGracePeriodSeconds: 10
