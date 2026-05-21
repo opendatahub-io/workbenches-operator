@@ -18,6 +18,7 @@ package controller
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io/fs"
 	"os"
@@ -304,10 +305,14 @@ var cleanupClusterGVKs = []schema.GroupVersionKind{
 }
 
 // cleanupManagedResources deletes all resources that were applied by this operator,
-// identified by the component label. It cleans both namespaced and cluster-scoped resources.
+// identified by the component labels. It cleans both namespaced and cluster-scoped resources.
+// Cleanup is best-effort: all resource types are attempted even if some fail, and
+// any errors are aggregated and returned at the end.
 func (r *WorkbenchesReconciler) cleanupManagedResources(ctx context.Context, namespace string) error {
 	l := log.FromContext(ctx)
 	l.Info("cleaning up managed resources", "namespace", namespace)
+
+	var errs []error
 
 	componentLabel := client.MatchingLabels{
 		metadata.ComponentLabelKey: metadata.LabelTrue,
@@ -320,6 +325,7 @@ func (r *WorkbenchesReconciler) cleanupManagedResources(ctx context.Context, nam
 
 		if err := r.List(ctx, list, client.InNamespace(namespace), componentLabel); err != nil {
 			l.Info("skipping GVK during cleanup (list failed)", "gvk", gvk, "error", err)
+			errs = append(errs, fmt.Errorf("failed to list %s: %w", gvk, err))
 
 			continue
 		}
@@ -329,7 +335,7 @@ func (r *WorkbenchesReconciler) cleanupManagedResources(ctx context.Context, nam
 			l.Info("deleting resource", "kind", obj.GetKind(), "name", obj.GetName(), "namespace", obj.GetNamespace())
 
 			if err := r.Delete(ctx, obj); client.IgnoreNotFound(err) != nil {
-				return fmt.Errorf("failed to delete %s %s/%s: %w", obj.GetKind(), obj.GetNamespace(), obj.GetName(), err)
+				errs = append(errs, fmt.Errorf("failed to delete %s %s/%s: %w", obj.GetKind(), obj.GetNamespace(), obj.GetName(), err))
 			}
 		}
 	}
@@ -340,6 +346,7 @@ func (r *WorkbenchesReconciler) cleanupManagedResources(ctx context.Context, nam
 
 		if err := r.List(ctx, list, componentLabel); err != nil {
 			l.Info("skipping cluster GVK during cleanup (list failed)", "gvk", gvk, "error", err)
+			errs = append(errs, fmt.Errorf("failed to list cluster %s: %w", gvk, err))
 
 			continue
 		}
@@ -349,14 +356,14 @@ func (r *WorkbenchesReconciler) cleanupManagedResources(ctx context.Context, nam
 			l.Info("deleting cluster resource", "kind", obj.GetKind(), "name", obj.GetName())
 
 			if err := r.Delete(ctx, obj); client.IgnoreNotFound(err) != nil {
-				return fmt.Errorf("failed to delete %s %s: %w", obj.GetKind(), obj.GetName(), err)
+				errs = append(errs, fmt.Errorf("failed to delete %s %s: %w", obj.GetKind(), obj.GetName(), err))
 			}
 		}
 	}
 
 	l.Info("managed resources cleanup complete")
 
-	return nil
+	return errors.Join(errs...)
 }
 
 // ensureKustomization creates a minimal kustomization.yaml if one does not exist,
