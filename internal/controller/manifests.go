@@ -23,6 +23,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -207,6 +208,8 @@ func writeParamsEnv(fSys filesys.FileSystem, kustomizeDir string, params map[str
 		}
 	}
 
+	var newKeys []string
+
 	for k, v := range params {
 		if strings.ContainsAny(k, "\n\r=") {
 			return fmt.Errorf("params key contains invalid characters: %q", k)
@@ -217,11 +220,14 @@ func writeParamsEnv(fSys filesys.FileSystem, kustomizeDir string, params map[str
 		}
 
 		if _, found := existing[k]; !found {
-			orderedKeys = append(orderedKeys, k)
+			newKeys = append(newKeys, k)
 		}
 
 		existing[k] = v
 	}
+
+	sort.Strings(newKeys)
+	orderedKeys = append(orderedKeys, newKeys...)
 
 	lines := make([]string, 0, len(orderedKeys))
 	for _, k := range orderedKeys {

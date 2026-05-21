@@ -185,6 +185,36 @@ func TestWriteParamsEnvEmpty(t *testing.T) {
 	}
 }
 
+func TestWriteParamsEnvNewKeysDeterministicOrder(t *testing.T) {
+	fSys := filesys.MakeFsInMemory()
+	dir := testDir
+
+	if err := fSys.Mkdir(dir); err != nil {
+		t.Fatal(err)
+	}
+
+	params := map[string]string{
+		"zebra":  "z",
+		"alpha":  "a",
+		"middle": "m",
+		"beta":   "b",
+	}
+
+	if err := writeParamsEnv(fSys, dir, params); err != nil {
+		t.Fatalf("writeParamsEnv() error = %v", err)
+	}
+
+	data, err := fSys.ReadFile(filepath.Join(dir, "params.env"))
+	if err != nil {
+		t.Fatalf("reading params.env: %v", err)
+	}
+
+	expected := "alpha=a\nbeta=b\nmiddle=m\nzebra=z\n"
+	if string(data) != expected {
+		t.Errorf("new keys not in sorted order\ngot:  %q\nwant: %q", string(data), expected)
+	}
+}
+
 func TestWriteParamsEnvRejectsControlCharacters(t *testing.T) {
 	fSys := filesys.MakeFsInMemory()
 	dir := testDir
