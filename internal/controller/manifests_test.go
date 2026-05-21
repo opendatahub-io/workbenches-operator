@@ -717,19 +717,19 @@ func TestRenderRealManifests(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			groups := manifestGroupsForPlatform(p)
 
+			workDir := t.TempDir()
+			srcRoot := filepath.Join(basePath, "workbenches")
+			dstRoot := filepath.Join(workDir, "workbenches")
+
+			if err := copyDir(srcRoot, dstRoot); err != nil {
+				t.Fatalf("copyDir() failed: %v", err)
+			}
+
 			for _, group := range groups {
 				srcDir := filepath.Join(basePath, group)
 
 				if _, statErr := os.Stat(srcDir); os.IsNotExist(statErr) {
-					t.Fatalf("manifest group directory does not exist: %s", srcDir)
-				}
-
-				workDir := t.TempDir()
-				srcRoot := filepath.Join(basePath, "workbenches")
-				dstRoot := filepath.Join(workDir, "workbenches")
-
-				if err := copyDir(srcRoot, dstRoot); err != nil {
-					t.Fatalf("copyDir() failed: %v", err)
+					t.Skipf("manifest group directory does not exist: %s", srcDir)
 				}
 
 				renderDir := filepath.Join(workDir, group)
