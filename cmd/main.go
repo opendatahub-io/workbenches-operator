@@ -77,6 +77,11 @@ func main() {
 
 	ctrl.SetLogger(zap.New(zap.UseFlagOptions(&opts)))
 
+	if info, err := os.Stat(manifestsBasePath); err != nil || !info.IsDir() {
+		setupLog.Error(err, "invalid manifests-base-path: must be an existing directory", "path", manifestsBasePath)
+		os.Exit(1)
+	}
+
 	var tlsOpts []func(*tls.Config)
 
 	if !enableHTTP2 {
