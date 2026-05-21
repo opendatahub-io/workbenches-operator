@@ -61,9 +61,16 @@ fetch_manifests() {
         (cd "${clone_dir}" && git fetch --depth 1 origin "${sha}" && git checkout "${sha}") 2>/dev/null
     fi
 
+    local resolved
+    resolved="$(realpath -m "${clone_dir}/${source_path}")"
+    if [[ "${resolved}" != "${clone_dir}"/* ]]; then
+        echo "ERROR: source_path '${source_path}' escapes clone directory"
+        exit 1
+    fi
+
     local dest="${MANIFEST_DIR}/${target}"
     mkdir -p "${dest}"
-    cp -r "${clone_dir}/${source_path}/." "${dest}/"
+    cp -r "${resolved}/." "${dest}/"
 
     echo "  -> ${dest}"
 }
