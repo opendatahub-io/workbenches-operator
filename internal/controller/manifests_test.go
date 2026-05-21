@@ -300,7 +300,6 @@ func TestIsNamespaced(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.kind, func(t *testing.T) {
 			obj := &unstructured.Unstructured{}
-			obj.SetGroupVersionKind(obj.GroupVersionKind())
 			obj.Object = map[string]interface{}{
 				"kind": tt.kind,
 			}
