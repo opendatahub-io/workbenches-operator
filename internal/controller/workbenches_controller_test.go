@@ -17,6 +17,8 @@ limitations under the License.
 package controller_test
 
 import (
+	"os"
+	"path/filepath"
 	"time"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -36,12 +38,38 @@ import (
 )
 
 var _ = Describe("Workbenches Controller", func() {
-	var reconciler *controller.WorkbenchesReconciler
+	var (
+		reconciler   *controller.WorkbenchesReconciler
+		manifestsDir string
+	)
 
 	BeforeEach(func() {
+		var err error
+		manifestsDir, err = os.MkdirTemp("", "wb-test-manifests-*")
+		Expect(err).NotTo(HaveOccurred())
+
+		kustomizationContent := []byte("apiVersion: kustomize.config.k8s.io/v1beta1\nkind: Kustomization\nresources: []\n")
+		for _, sub := range []string{
+			"workbenches/kf-notebook-controller/overlays/openshift",
+			"workbenches/odh-notebook-controller/base",
+			"workbenches/notebooks/odh/base",
+			"workbenches/notebooks/rhoai/base",
+		} {
+			dir := filepath.Join(manifestsDir, sub)
+			Expect(os.MkdirAll(dir, 0o755)).To(Succeed())
+			Expect(os.WriteFile(filepath.Join(dir, "kustomization.yaml"), kustomizationContent, 0o644)).To(Succeed())
+		}
+
 		reconciler = &controller.WorkbenchesReconciler{
-			Client: k8sClient,
-			Scheme: scheme.Scheme,
+			Client:            k8sClient,
+			Scheme:            scheme.Scheme,
+			ManifestsBasePath: manifestsDir,
+		}
+	})
+
+	AfterEach(func() {
+		if manifestsDir != "" {
+			os.RemoveAll(manifestsDir)
 		}
 	})
 
