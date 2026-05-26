@@ -17,6 +17,9 @@ metadata:
   name: odh-workbenches-operator-on-push
   namespace: open-data-hub-tenant
 spec:
+  timeouts:
+    pipeline: 2h
+    tasks: 1h
   params:
   - name: git-url
     value: '{{source_url}}'
@@ -28,6 +31,14 @@ spec:
     value: Dockerfile
   - name: path-context
     value: ./
+  - name: pipeline-type
+    value: "kubeflow-main-build"
+  - name: build-source-image
+    value: "false"
+  - name: skip-checks
+    value: "true"
+  - name: enable-slack-failure-notification
+    value: "false"
   pipelineRef:
     resolver: git
     params:

@@ -6,7 +6,7 @@ metadata:
     build.appstudio.redhat.com/commit_sha: '{{revision}}'
     build.appstudio.redhat.com/target_branch: '{{target_branch}}'
     build.appstudio.redhat.com/pull_request_number: '{{pull_request_number}}'
-    pipelinesascode.tekton.dev/cancel-in-progress: "false"
+    pipelinesascode.tekton.dev/cancel-in-progress: "true"
     pipelinesascode.tekton.dev/max-keep-runs: "3"
     pipelinesascode.tekton.dev/on-cel-expression: event == "pull_request" && target_branch
       == "main"
@@ -18,6 +18,9 @@ metadata:
   name: odh-workbenches-operator-on-pull-request
   namespace: open-data-hub-tenant
 spec:
+  timeouts:
+    pipeline: 2h
+    tasks: 1h
   params:
   - name: git-url
     value: '{{source_url}}'
@@ -25,6 +28,8 @@ spec:
     value: '{{revision}}'
   - name: output-image
     value: quay.io/opendatahub/odh-workbenches-operator:odh-pr
+  - name: image-expires-after
+    value: 7d
   - name: dockerfile
     value: Dockerfile
   - name: path-context
@@ -34,6 +39,12 @@ spec:
     - 'odh-pr-{{revision}}'
   - name: pipeline-type
     value: pull-request
+  - name: build-source-image
+    value: "false"
+  - name: skip-checks
+    value: "true"
+  - name: enable-slack-failure-notification
+    value: "false"
   pipelineRef:
     resolver: git
     params:
