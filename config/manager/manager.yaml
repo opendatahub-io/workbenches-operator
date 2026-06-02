@@ -63,6 +63,9 @@ spec:
             port: 8081
           initialDelaySeconds: 5
           periodSeconds: 10
+        volumeMounts:
+        - name: tmp
+          mountPath: /tmp
         resources:
           limits:
             cpu: 500m
@@ -70,5 +73,9 @@ spec:
           requests:
             cpu: 10m
             memory: 128Mi
+      volumes:
+      - name: tmp
+        emptyDir:
+          sizeLimit: 256Mi
       serviceAccountName: controller-manager
       terminationGracePeriodSeconds: 10

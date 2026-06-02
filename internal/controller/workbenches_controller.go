@@ -31,9 +31,11 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/util/workqueue"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
 	"sigs.k8s.io/controller-runtime/pkg/log"
+	"sigs.k8s.io/controller-runtime/pkg/predicate"
 
 	componentsv1alpha1 "github.com/opendatahub-io/workbenches-operator/api/v1alpha1"
 	"github.com/opendatahub-io/workbenches-operator/internal/metadata"
@@ -56,14 +58,25 @@ const (
 // WorkbenchesReconciler reconciles a Workbenches object.
 type WorkbenchesReconciler struct {
 	client.Client
-	Scheme *runtime.Scheme
+
+	Scheme            *runtime.Scheme
+	ManifestsBasePath string
 }
 
-// +kubebuilder:rbac:groups=components.platform.opendatahub.io,resources=workbenches,verbs=get;list;watch
+// +kubebuilder:rbac:groups=components.platform.opendatahub.io,resources=workbenches,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=components.platform.opendatahub.io,resources=workbenches/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=components.platform.opendatahub.io,resources=workbenches/finalizers,verbs=update
 // +kubebuilder:rbac:groups="",resources=namespaces,verbs=get;list;watch;create;update;patch
-// +kubebuilder:rbac:groups=apps,resources=deployments,verbs=get;list;watch
+// +kubebuilder:rbac:groups="",resources=configmaps;services;serviceaccounts,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=apps,resources=deployments,verbs=get;list;watch;create;update;patch;delete
+// escalate and bind for RBAC resources are granted in a separate hand-maintained ClusterRole
+// (config/rbac/rbac_escalate_role.yaml) scoped to specific resourceNames from upstream manifests.
+// +kubebuilder:rbac:groups=rbac.authorization.k8s.io,resources=roles;rolebindings;clusterroles;clusterrolebindings,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=apiextensions.k8s.io,resources=customresourcedefinitions,verbs=get;list;watch;create;update;patch;delete
+// Write verbs are required because the operator creates/patches webhook configs from upstream manifests via SSA
+// and deletes them during component removal.
+// +kubebuilder:rbac:groups=admissionregistration.k8s.io,resources=mutatingwebhookconfigurations;validatingwebhookconfigurations,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=image.openshift.io,resources=imagestreams,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=authorization.k8s.io,resources=subjectaccessreviews,verbs=create
 
 // Reconcile handles the reconciliation loop for Workbenches resources.
@@ -91,7 +104,7 @@ func (r *WorkbenchesReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 // to avoid tight retry loops on persistent failures like missing manifests.
 func (r *WorkbenchesReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
-		For(&componentsv1alpha1.Workbenches{}).
+		For(&componentsv1alpha1.Workbenches{}, builder.WithPredicates(predicate.GenerationChangedPredicate{})).
 		Named("workbenches").
 		WithOptions(controller.Options{
 			RateLimiter: workqueue.NewTypedItemExponentialFailureRateLimiter[ctrl.Request](
@@ -133,12 +146,22 @@ func (r *WorkbenchesReconciler) reconcileRemoved(ctx context.Context, wb *compon
 func (r *WorkbenchesReconciler) reconcileManaged(ctx context.Context, wb *componentsv1alpha1.Workbenches) (ctrl.Result, error) {
 	l := log.FromContext(ctx)
 
+	if err := validateSpec(wb.Spec); err != nil {
+		return r.setErrorStatus(ctx, wb, "InvalidSpec", err)
+	}
+
 	if err := r.configureDependencies(ctx, wb); err != nil {
 		return r.setErrorStatus(ctx, wb, "ConfigureDependenciesFailed", err)
 	}
 
 	params := r.computeKustomizeParams(wb)
 	l.V(1).Info("computed kustomize params", "params", params)
+
+	nsName := r.resolveWorkbenchNamespace(wb)
+
+	if err := r.renderAndApply(ctx, params, nsName, wb.Spec.Platform); err != nil {
+		return r.setErrorStatus(ctx, wb, "ManifestApplyFailed", err)
+	}
 
 	meta.SetStatusCondition(&wb.Status.Conditions, metav1.Condition{
 		Type:               conditionTypeProvisioningSucceeded,
@@ -151,7 +174,7 @@ func (r *WorkbenchesReconciler) reconcileManaged(ctx context.Context, wb *compon
 	deploymentsReady, deployMsg := r.checkDeployments(ctx, wb)
 	r.setDeploymentCondition(wb, deploymentsReady, deployMsg)
 
-	wb.Status.WorkbenchNamespace = r.resolveWorkbenchNamespace(wb)
+	wb.Status.WorkbenchNamespace = nsName
 	wb.Status.ObservedGeneration = wb.Generation
 	r.setReadyCondition(wb, deploymentsReady, deployMsg)
 
@@ -263,6 +286,15 @@ func (r *WorkbenchesReconciler) configureDependencies(ctx context.Context, wb *c
 		if updateErr := r.Update(ctx, ns); updateErr != nil {
 			return fmt.Errorf("failed to update namespace %s labels: %w", nsName, updateErr)
 		}
+	}
+
+	return nil
+}
+
+func validateSpec(spec componentsv1alpha1.WorkbenchesSpec) error {
+	if spec.Platform != "" && !platform.IsValid(spec.Platform) {
+		return fmt.Errorf("unsupported platform %q, must be one of: %s, %s",
+			spec.Platform, platform.OpenDataHub, platform.SelfManagedRhoai)
 	}
 
 	return nil

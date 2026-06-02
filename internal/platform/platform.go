@@ -29,6 +29,16 @@ const (
 	DefaultNotebooksNamespaceRHOAI = "rhods-notebooks"
 )
 
+// IsValid reports whether platformType is a recognized platform value.
+func IsValid(platformType string) bool {
+	switch platformType {
+	case OpenDataHub, SelfManagedRhoai:
+		return true
+	default:
+		return false
+	}
+}
+
 // SectionTitle returns the UI section title based on platform type.
 func SectionTitle(platformType string) string {
 	titles := map[string]string{
