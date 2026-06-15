@@ -40,6 +40,7 @@ import (
 	componentsv1alpha1 "github.com/opendatahub-io/workbenches-operator/api/v1alpha1"
 	"github.com/opendatahub-io/workbenches-operator/internal/metadata"
 	"github.com/opendatahub-io/workbenches-operator/internal/platform"
+	"github.com/opendatahub-io/workbenches-operator/internal/releases"
 )
 
 const (
@@ -47,6 +48,7 @@ const (
 	conditionTypeProvisioningSucceeded = "ProvisioningSucceeded"
 	conditionTypeDegraded              = "Degraded"
 	conditionTypeDeploymentsAvailable  = "DeploymentsAvailable"
+	conditionTypeReleaseMetadataAvailable = "ReleaseMetadataAvailable"
 	phaseReady                         = "Ready"
 	phaseNotReady                      = "Not Ready"
 	requeueDelay                       = 30 * time.Second
@@ -136,11 +138,23 @@ func (r *WorkbenchesReconciler) reconcileRemoved(ctx context.Context, wb *compon
 	})
 
 	wb.Status.Phase = phaseNotReady
+	wb.Status.Releases = nil
 	wb.Status.ObservedGeneration = wb.Generation
 
 	err := r.Status().Update(ctx, wb)
 
 	return ctrl.Result{}, err
+}
+
+func (r *WorkbenchesReconciler) populateReleases(wb *componentsv1alpha1.Workbenches) error {
+	componentReleases, err := releases.CollectWorkbenchesReleases(r.ManifestsBasePath)
+	if err != nil {
+		return fmt.Errorf("collecting component releases: %w", err)
+	}
+
+	wb.Status.Releases = componentReleases
+
+	return nil
 }
 
 func (r *WorkbenchesReconciler) reconcileManaged(ctx context.Context, wb *componentsv1alpha1.Workbenches) (ctrl.Result, error) {
@@ -161,6 +175,28 @@ func (r *WorkbenchesReconciler) reconcileManaged(ctx context.Context, wb *compon
 
 	if err := r.renderAndApply(ctx, params, nsName, wb.Spec.Platform); err != nil {
 		return r.setErrorStatus(ctx, wb, "ManifestApplyFailed", err)
+	}
+
+	if err := r.populateReleases(wb); err != nil {
+		// Release metadata is informational; a missing or malformed
+		// component_metadata.yaml must not block a successful deploy.
+		l.Error(err, "failed to populate release metadata; continuing with empty releases")
+		wb.Status.Releases = nil
+		meta.SetStatusCondition(&wb.Status.Conditions, metav1.Condition{
+			Type:               conditionTypeReleaseMetadataAvailable,
+			Status:             metav1.ConditionFalse,
+			Reason:             "ReleaseMetadataFailed",
+			Message:            err.Error(),
+			ObservedGeneration: wb.Generation,
+		})
+	} else {
+		meta.SetStatusCondition(&wb.Status.Conditions, metav1.Condition{
+			Type:               conditionTypeReleaseMetadataAvailable,
+			Status:             metav1.ConditionTrue,
+			Reason:             "Available",
+			Message:            "Component release metadata is available",
+			ObservedGeneration: wb.Generation,
+		})
 	}
 
 	meta.SetStatusCondition(&wb.Status.Conditions, metav1.Condition{

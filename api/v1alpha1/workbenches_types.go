@@ -69,9 +69,9 @@ type WorkbenchesSpec struct {
 type ComponentRelease struct {
 	// +required
 	// +kubebuilder:validation:Required
-	Name    string `json:"name"`
-	Version string `json:"version,omitempty"`
-	RepoURL string `json:"repoUrl,omitempty"`
+	Name    string `json:"name"              yaml:"name"`
+	Version string `json:"version,omitempty" yaml:"version,omitempty"`
+	RepoURL string `json:"repoUrl,omitempty" yaml:"repoUrl,omitempty"`
 }
 
 // WorkbenchesStatus defines the observed state of Workbenches.

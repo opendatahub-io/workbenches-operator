@@ -51,14 +51,26 @@ var _ = Describe("Workbenches Controller", func() {
 		kustomizationContent := []byte("apiVersion: kustomize.config.k8s.io/v1beta1\nkind: Kustomization\nresources: []\n")
 		for _, sub := range []string{
 			"workbenches/kf-notebook-controller/overlays/openshift",
+			"workbenches/kf-notebook-controller",
 			"workbenches/odh-notebook-controller/base",
 			"workbenches/notebooks/odh/base",
 			"workbenches/notebooks/rhoai/base",
 		} {
 			dir := filepath.Join(manifestsDir, sub)
-			Expect(os.MkdirAll(dir, 0o755)).To(Succeed())
-			Expect(os.WriteFile(filepath.Join(dir, "kustomization.yaml"), kustomizationContent, 0o644)).To(Succeed())
+			Expect(os.MkdirAll(dir, 0o750)).To(Succeed())
+			Expect(os.WriteFile(filepath.Join(dir, "kustomization.yaml"), kustomizationContent, 0o600)).To(Succeed())
 		}
+
+		metadataContent := []byte(`releases:
+  - name: Kubeflow Notebook Controller
+    version: 1.10.0
+    repoUrl: https://github.com/kubeflow/kubeflow
+`)
+		Expect(os.WriteFile(
+			filepath.Join(manifestsDir, "workbenches/kf-notebook-controller/component_metadata.yaml"),
+			metadataContent,
+			0o600,
+		)).To(Succeed())
 
 		reconciler = &controller.WorkbenchesReconciler{
 			Client:            k8sClient,
@@ -102,6 +114,49 @@ var _ = Describe("Workbenches Controller", func() {
 			Expect(provCond).NotTo(BeNil())
 			Expect(provCond.Status).To(Equal(metav1.ConditionTrue))
 			Expect(provCond.Reason).To(Equal("Provisioned"))
+
+			Expect(updated.Status.Releases).To(HaveLen(1))
+			Expect(updated.Status.Releases[0].Name).To(Equal("Kubeflow Notebook Controller"))
+			Expect(updated.Status.Releases[0].Version).To(Equal("1.10.0"))
+			Expect(updated.Status.Releases[0].RepoURL).To(Equal("https://github.com/kubeflow/kubeflow"))
+
+			releaseCond := meta.FindStatusCondition(updated.Status.Conditions, "ReleaseMetadataAvailable")
+			Expect(releaseCond).NotTo(BeNil())
+			Expect(releaseCond.Status).To(Equal(metav1.ConditionTrue))
+			Expect(releaseCond.Reason).To(Equal("Available"))
+		})
+
+		It("Should continue reconciliation when release metadata is malformed", func() {
+			nsName := "test-ns-bad-metadata"
+			Expect(os.WriteFile(
+				filepath.Join(manifestsDir, "workbenches/kf-notebook-controller/component_metadata.yaml"),
+				[]byte("not: valid: yaml: ["),
+				0o600,
+			)).To(Succeed())
+
+			wb := createWorkbenches("Managed", nsName, "OpenDataHub")
+
+			DeferCleanup(func() {
+				cleanupWorkbenches(wb)
+				cleanupNamespace(nsName)
+			})
+
+			result, err := reconciler.Reconcile(ctx, requestFor(wb))
+			Expect(err).NotTo(HaveOccurred())
+			Expect(result.RequeueAfter).To(Equal(30 * time.Second))
+
+			updated := getWorkbenches(wb.Name)
+
+			provCond := meta.FindStatusCondition(updated.Status.Conditions, "ProvisioningSucceeded")
+			Expect(provCond).NotTo(BeNil())
+			Expect(provCond.Status).To(Equal(metav1.ConditionTrue))
+			Expect(provCond.Reason).To(Equal("Provisioned"))
+			Expect(updated.Status.Releases).To(BeEmpty())
+
+			releaseCond := meta.FindStatusCondition(updated.Status.Conditions, "ReleaseMetadataAvailable")
+			Expect(releaseCond).NotTo(BeNil())
+			Expect(releaseCond.Status).To(Equal(metav1.ConditionFalse))
+			Expect(releaseCond.Reason).To(Equal("ReleaseMetadataFailed"))
 		})
 
 		It("Should set DeploymentsAvailable=False when no deployments exist", func() {
@@ -241,6 +296,8 @@ var _ = Describe("Workbenches Controller", func() {
 			Expect(provCond).NotTo(BeNil())
 			Expect(provCond.Status).To(Equal(metav1.ConditionFalse))
 			Expect(provCond.Reason).To(Equal("Removed"))
+
+			Expect(updated.Status.Releases).To(BeEmpty())
 		})
 	})
 
