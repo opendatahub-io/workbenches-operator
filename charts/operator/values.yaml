@@ -48,8 +48,9 @@ serviceAccount:
   # Becomes {{ namePrefix }}controller-manager when namePrefix is set.
   name: controller-manager
 
+# Disabled by default: bootstrap runs a single replica; enable when scaling out.
 leaderElection:
-  enabled: true
+  enabled: false
 
 metrics:
   bindAddress: ":8443"

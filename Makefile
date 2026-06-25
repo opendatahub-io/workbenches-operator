@@ -74,7 +74,7 @@ CHART_DIR ?= charts/operator
 HELM_IMAGE ?= docker.io/alpine/helm@sha256:8af788e831994fb426290aa30d8a0dbfefd4f32a3bbe851c4129d28db360c9d8
 
 .PHONY: chart-sync-crd
-chart-sync-crd: manifests ## Copy generated Workbenches CRD into the Helm chart.
+chart-sync-crd: manifests ## Copy generated Workbenches CRD into the Helm chart (generated; not a second source of truth).
 	mkdir -p "$(CHART_DIR)/crd"
 	cp config/crd/bases/components.platform.opendatahub.io_workbenches.yaml "$(CHART_DIR)/crd/workbenches.crd.yaml"
 
@@ -89,7 +89,7 @@ helm-lint: chart-sync-crd chart-verify-params ## Lint the operator Helm chart.
 	@if command -v helm >/dev/null 2>&1; then \
 		helm lint "$(CHART_DIR)"; \
 	else \
-		podman run --rm -v "$(CURDIR)/$(CHART_DIR):/chart:Z" $(HELM_IMAGE) lint /chart; \
+		podman run --rm -v "$(CURDIR)/$(CHART_DIR):/chart:Z" "$(HELM_IMAGE)" lint /chart; \
 	fi
 
 .PHONY: helm-template
@@ -99,7 +99,7 @@ helm-template: chart-sync-crd chart-verify-params ## Render the operator Helm ch
 			--namespace workbenches-operator-system \
 			--set applicationsNamespace=opendatahub; \
 	else \
-		podman run --rm -v "$(CURDIR)/$(CHART_DIR):/chart:Z" $(HELM_IMAGE) \
+		podman run --rm -v "$(CURDIR)/$(CHART_DIR):/chart:Z" "$(HELM_IMAGE)" \
 			template workbenches-operator /chart \
 			--namespace workbenches-operator-system \
 			--set applicationsNamespace=opendatahub; \

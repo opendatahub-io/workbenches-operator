@@ -3,3 +3,10 @@
 *.swp
 *.bak
 *.tmp
+README.md
+LICENSE
+Makefile
+params.env
+*.md
+ci/
+tests/
