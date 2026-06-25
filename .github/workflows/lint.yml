@@ -1,0 +1,80 @@
+name: Lint
+
+on:
+  push:
+    branches: [main, stable, v1.x]
+  pull_request:
+    branches: [main, stable, v1.x]
+  workflow_dispatch:
+
+jobs:
+  golangci-lint:
+    name: golangci-lint
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-go@v6
+        with:
+          check-latest: true
+          go-version-file: go.mod
+
+      - name: Generate code
+        run: make generate
+
+      - name: Run golangci-lint
+        uses: golangci/golangci-lint-action@v9
+        with:
+          version: v2.12.2
+          only-new-issues: true
+
+  vet:
+    name: go vet
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-go@v6
+        with:
+          check-latest: true
+          go-version-file: go.mod
+
+      - name: Generate code
+        run: make generate
+
+      - name: Run go vet
+        run: go vet ./...
+
+  kube-linter:
+    name: kube-linter
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-go@v6
+        with:
+          check-latest: true
+          go-version-file: go.mod
+
+      - name: Generate manifests
+        run: make manifests
+
+      - name: Install kube-linter
+        run: go install golang.stackrox.io/kube-linter/cmd/kube-linter@v0.8.3
+
+      - name: Lint Kustomize output
+        run: |
+          make kustomize
+          bin/kustomize build config/default | kube-linter lint -

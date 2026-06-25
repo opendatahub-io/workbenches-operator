@@ -1,0 +1,62 @@
+version: "2"
+
+run:
+  timeout: 10m
+
+linters:
+  default: all
+  exclusions:
+    rules:
+      - linters:
+          - lll
+        source: "kubebuilder:webhook:|webhook:path="
+  disable:
+    - cyclop
+    - depguard
+    - exhaustruct
+    - funlen
+    - gochecknoglobals
+    - gochecknoinits
+    - godox
+    - ireturn
+    - mnd
+    - nlreturn
+    - noinlineerr
+    - nonamedreturns
+    - paralleltest
+    - tagliatelle
+    - testpackage
+    - varnamelen
+    - wrapcheck
+    - wsl
+    - wsl_v5
+
+  settings:
+    errcheck:
+      check-type-assertions: true
+    govet:
+      enable-all: true
+      disable:
+        - fieldalignment
+    lll:
+      line-length: 180
+    nolintlint:
+      require-specific: true
+    revive:
+      rules:
+        - name: dot-imports
+          disabled: true
+        - name: package-comments
+          disabled: true
+
+formatters:
+  enable:
+    - gci
+    - gofmt
+    - goimports
+  settings:
+    gci:
+      sections:
+        - standard
+        - default
+        - prefix(github.com/opendatahub-io/workbenches-operator)
