@@ -6,7 +6,7 @@ COPY get_all_manifests.sh .
 RUN bash get_all_manifests.sh
 
 ## Stage 2: Build the manager binary
-FROM registry.access.redhat.com/ubi9/go-toolset:1.25 AS builder
+FROM registry.access.redhat.com/ubi9/go-toolset:1.26 AS builder
 ARG TARGETOS
 ARG TARGETARCH
 
