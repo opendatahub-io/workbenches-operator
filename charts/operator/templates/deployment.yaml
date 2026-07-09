@@ -37,6 +37,12 @@ spec:
         - name: tmp
           emptyDir:
             sizeLimit: 256Mi
+        {{- if and .Values.webhooks.enabled .Values.webhooks.tlsProvider }}
+        - name: cert
+          secret:
+            defaultMode: 420
+            secretName: {{ include "workbenches-operator.webhookCertSecret" . }}
+        {{- end }}
       containers:
         - name: manager
           image: {{ include "workbenches-operator.image" . | quote }}
@@ -51,6 +57,11 @@ spec:
             - containerPort: 8443
               name: https
               protocol: TCP
+            {{- if .Values.webhooks.enabled }}
+            - containerPort: {{ .Values.webhooks.port }}
+              name: webhook-server
+              protocol: TCP
+            {{- end }}
           livenessProbe:
             httpGet:
               path: /healthz
@@ -74,3 +85,8 @@ spec:
           volumeMounts:
             - name: tmp
               mountPath: /tmp
+            {{- if and .Values.webhooks.enabled .Values.webhooks.tlsProvider }}
+            - name: cert
+              mountPath: /tmp/k8s-webhook-server/serving-certs
+              readOnly: true
+            {{- end }}

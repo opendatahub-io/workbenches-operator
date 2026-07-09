@@ -72,6 +72,27 @@ resources:
     cpu: 10m
     memory: 128Mi
 
+# Webhook configuration for the notebook connection mutating webhook.
+webhooks:
+  enabled: true
+  port: 9443
+  # TLS provider for webhook serving certificates.
+  # Supported values:
+  #   "openshift"    — uses OpenShift service-CA (serving-cert-secret-name +
+  #                    inject-cabundle annotations). Default.
+  #   "certmanager"  — uses cert-manager Certificate + Issuer resources.
+  #                    Requires cert-manager to be installed on the cluster.
+  #   ""             — disables TLS volume mount entirely (use when the platform
+  #                    provisions certificates out-of-band).
+  tlsProvider: openshift
+  certSecret: ""   # auto-derived from namePrefix when empty
+  # cert-manager settings (only used when tlsProvider is "certmanager").
+  certManager:
+    createIssuer: true   # create a self-signed ClusterIssuer; set false to use an existing one
+    issuerRef:
+      kind: ClusterIssuer
+      name: ""           # auto-derived from namePrefix when empty
+
 # Additional container environment variables (merged before APPLICATIONS_NAMESPACE).
 extraEnv: []
 

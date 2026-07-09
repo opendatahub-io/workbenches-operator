@@ -91,6 +91,11 @@ Operator container arguments.
 {{- else }}
 - --metrics-secure=false
 {{- end }}
+{{- if .Values.webhooks.enabled }}
+- --enable-webhooks=true
+{{- else }}
+- --enable-webhooks=false
+{{- end }}
 {{- end }}
 
 {{/*
@@ -114,6 +119,51 @@ Resolution order:
 {{- else -}}
 {{- printf "%s:%s" .Values.image.repository .Values.image.tag -}}
 {{- end -}}
+{{- end }}
+
+{{/*
+Webhook Service name.
+*/}}
+{{- define "workbenches-operator.webhookServiceName" -}}
+{{- include "workbenches-operator.prefixed" (list . "webhook-service") -}}
+{{- end }}
+
+{{/*
+Webhook cert Secret name. Uses webhooks.certSecret when set, otherwise derives
+from namePrefix to match the kustomize convention.
+*/}}
+{{- define "workbenches-operator.webhookCertSecret" -}}
+{{- if .Values.webhooks.certSecret -}}
+{{- .Values.webhooks.certSecret -}}
+{{- else -}}
+{{- include "workbenches-operator.prefixed" (list . "controller-webhook-cert") -}}
+{{- end -}}
+{{- end }}
+
+{{/*
+cert-manager Certificate name.
+*/}}
+{{- define "workbenches-operator.webhookCertificateName" -}}
+{{- include "workbenches-operator.prefixed" (list . "webhook-cert") -}}
+{{- end }}
+
+{{/*
+cert-manager Issuer name. Uses webhooks.certManager.issuerRef.name when set,
+otherwise derives from namePrefix.
+*/}}
+{{- define "workbenches-operator.webhookIssuerName" -}}
+{{- if .Values.webhooks.certManager.issuerRef.name -}}
+{{- .Values.webhooks.certManager.issuerRef.name -}}
+{{- else -}}
+{{- include "workbenches-operator.prefixed" (list . "selfsigned-issuer") -}}
+{{- end -}}
+{{- end }}
+
+{{/*
+MutatingWebhookConfiguration name.
+*/}}
+{{- define "workbenches-operator.mutatingWebhookName" -}}
+{{- include "workbenches-operator.prefixed" (list . "mutating-webhook-configuration") -}}
 {{- end }}
 
 {{/*
