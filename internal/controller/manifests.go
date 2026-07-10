@@ -26,6 +26,7 @@ import (
 	"sort"
 	"strings"
 
+	"k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -342,7 +343,12 @@ func (r *WorkbenchesReconciler) cleanupManagedResources(ctx context.Context, nam
 		list.SetGroupVersionKind(gvk)
 
 		if err := r.List(ctx, list, client.InNamespace(namespace), componentLabel); err != nil {
-			l.Info("skipping GVK during cleanup (list failed)", "gvk", gvk, "error", err)
+			if meta.IsNoMatchError(err) {
+				l.Info("skipping GVK during cleanup (API not available)", "gvk", gvk)
+
+				continue
+			}
+
 			errs = append(errs, fmt.Errorf("failed to list %s: %w", gvk, err))
 
 			continue
@@ -363,7 +369,12 @@ func (r *WorkbenchesReconciler) cleanupManagedResources(ctx context.Context, nam
 		list.SetGroupVersionKind(gvk)
 
 		if err := r.List(ctx, list, componentLabel); err != nil {
-			l.Info("skipping cluster GVK during cleanup (list failed)", "gvk", gvk, "error", err)
+			if meta.IsNoMatchError(err) {
+				l.Info("skipping cluster GVK during cleanup (API not available)", "gvk", gvk)
+
+				continue
+			}
+
 			errs = append(errs, fmt.Errorf("failed to list cluster %s: %w", gvk, err))
 
 			continue

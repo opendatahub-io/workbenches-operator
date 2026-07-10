@@ -18,6 +18,7 @@ package controller
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"sort"
@@ -33,13 +34,18 @@ import (
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
+	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
+	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/kustomize/kyaml/filesys"
 
+	componentsv1alpha1 "github.com/opendatahub-io/workbenches-operator/api/v1alpha1"
 	"github.com/opendatahub-io/workbenches-operator/internal/metadata"
 	"github.com/opendatahub-io/workbenches-operator/internal/platform"
 )
 
 const testDir = "/test"
+
+var errSimulatedDeleteFailure = errors.New("simulated delete failure")
 
 func TestManifestGroupsForPlatform(t *testing.T) {
 	const wantKF = "workbenches/kf-notebook-controller/overlays/openshift"
@@ -845,5 +851,81 @@ func TestCleanupManagedResources(t *testing.T) {
 
 	if len(svcList.Items) != 0 {
 		t.Errorf("expected 0 services, got %d", len(svcList.Items))
+	}
+}
+
+func TestReconcileDeleteReturnsErrorWhenCleanupFails(t *testing.T) {
+	scheme := runtime.NewScheme()
+	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
+	utilruntime.Must(appsv1.AddToScheme(scheme))
+	utilruntime.Must(componentsv1alpha1.AddToScheme(scheme))
+
+	namespace := "test-delete-cleanup-fail"
+	deleteErr := errSimulatedDeleteFailure
+
+	labeledDeploy := &appsv1.Deployment{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "notebook-controller",
+			Namespace: namespace,
+			Labels: map[string]string{
+				metadata.ComponentLabelKey: metadata.LabelTrue,
+				metadata.PartOfLabelKey:    metadata.ComponentLabelValue,
+			},
+		},
+		Spec: appsv1.DeploymentSpec{
+			Selector: &metav1.LabelSelector{
+				MatchLabels: map[string]string{"app": "notebook-controller"},
+			},
+			Template: corev1.PodTemplateSpec{
+				ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{"app": "notebook-controller"}},
+				Spec:       corev1.PodSpec{Containers: []corev1.Container{{Name: "c", Image: "img"}}},
+			},
+		},
+	}
+
+	fakeClient := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithObjects(labeledDeploy).
+		WithInterceptorFuncs(interceptor.Funcs{
+			Delete: func(ctx context.Context, c client.WithWatch, obj client.Object, opts ...client.DeleteOption) error {
+				return deleteErr
+			},
+		}).
+		Build()
+
+	reconciler := &WorkbenchesReconciler{
+		Client: fakeClient,
+		Scheme: scheme,
+	}
+
+	wb := &componentsv1alpha1.Workbenches{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: componentsv1alpha1.WorkbenchesInstanceName,
+		},
+		Spec: componentsv1alpha1.WorkbenchesSpec{
+			ManagementState:    "Managed",
+			WorkbenchNamespace: namespace,
+			Platform:           "OpenDataHub",
+		},
+	}
+	controllerutil.AddFinalizer(wb, workbenchesFinalizer)
+
+	ctx := context.Background()
+
+	result, err := reconciler.reconcileDelete(ctx, wb)
+	if err == nil {
+		t.Fatal("expected reconcileDelete to return an error when cleanup fails, got nil")
+	}
+
+	if !strings.Contains(err.Error(), "simulated delete failure") {
+		t.Errorf("expected error to contain 'simulated delete failure', got: %v", err)
+	}
+
+	if result.RequeueAfter != 0 {
+		t.Error("expected no explicit requeue on error")
+	}
+
+	if !controllerutil.ContainsFinalizer(wb, workbenchesFinalizer) {
+		t.Error("finalizer should not be removed when cleanup fails")
 	}
 }

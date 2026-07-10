@@ -32,9 +32,11 @@ import (
 	"k8s.io/utils/ptr"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 
 	componentsv1alpha1 "github.com/opendatahub-io/workbenches-operator/api/v1alpha1"
 	"github.com/opendatahub-io/workbenches-operator/internal/controller"
+	"github.com/opendatahub-io/workbenches-operator/internal/metadata"
 )
 
 var _ = Describe("Workbenches Controller", func() {
@@ -299,6 +301,44 @@ var _ = Describe("Workbenches Controller", func() {
 
 			Expect(updated.Status.Releases).To(BeEmpty())
 		})
+
+		It("Should clean up labeled resources when transitioning to Removed", func() {
+			nsName := "test-ns-removed-cleanup"
+			createNamespace(nsName)
+			createDeployment(nsName, "notebook-controller", 1)
+
+			wb := createWorkbenches("Managed", nsName, "OpenDataHub")
+
+			DeferCleanup(func() {
+				cleanupWorkbenches(wb)
+				cleanupDeployments(nsName)
+				cleanupNamespace(nsName)
+			})
+
+			// First reconcile in Managed state adds the finalizer
+			_, err := reconciler.Reconcile(ctx, requestFor(wb))
+			Expect(err).NotTo(HaveOccurred())
+
+			// Transition to Removed
+			updated := getWorkbenches(wb.Name)
+			updated.Spec.ManagementState = "Removed"
+			Expect(k8sClient.Update(ctx, updated)).To(Succeed())
+
+			_, err = reconciler.Reconcile(ctx, requestFor(wb))
+			Expect(err).NotTo(HaveOccurred())
+
+			// Verify the labeled deployment was deleted
+			deploys := &appsv1.DeploymentList{}
+			Expect(k8sClient.List(ctx, deploys, client.InNamespace(nsName), client.MatchingLabels{
+				metadata.ComponentLabelKey: metadata.LabelTrue,
+				metadata.PartOfLabelKey:    metadata.ComponentLabelValue,
+			})).To(Succeed())
+			Expect(deploys.Items).To(BeEmpty())
+
+			// Verify status is set correctly
+			final := getWorkbenches(wb.Name)
+			Expect(final.Status.Phase).To(Equal("Not Ready"))
+		})
 	})
 
 	Context("When the resource does not exist", func() {
@@ -306,6 +346,129 @@ var _ = Describe("Workbenches Controller", func() {
 			result, err := reconciler.Reconcile(ctx, ctrl.Request{
 				NamespacedName: types.NamespacedName{Name: "nonexistent"},
 			})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(result).To(Equal(ctrl.Result{}))
+		})
+	})
+
+	Context("Finalizer management", func() {
+		It("Should add the finalizer on first reconcile", func() {
+			nsName := "test-ns-finalizer-add"
+			wb := createWorkbenches("Managed", nsName, "OpenDataHub")
+
+			DeferCleanup(func() {
+				cleanupWorkbenches(wb)
+				cleanupNamespace(nsName)
+			})
+
+			_, err := reconciler.Reconcile(ctx, requestFor(wb))
+			Expect(err).NotTo(HaveOccurred())
+
+			updated := getWorkbenches(wb.Name)
+			Expect(updated.Finalizers).To(ContainElement("components.platform.opendatahub.io/workbenches-cleanup"))
+		})
+
+		It("Should clean up labeled resources and remove finalizer on deletion", func() {
+			nsName := "test-ns-finalizer-del"
+			createNamespace(nsName)
+			createDeployment(nsName, "notebook-controller-deployment", 1)
+
+			wb := createWorkbenches("Managed", nsName, "OpenDataHub")
+
+			DeferCleanup(func() {
+				cleanupWorkbenches(wb)
+				cleanupDeployments(nsName)
+				cleanupNamespace(nsName)
+			})
+
+			// First reconcile adds the finalizer
+			_, err := reconciler.Reconcile(ctx, requestFor(wb))
+			Expect(err).NotTo(HaveOccurred())
+
+			updated := getWorkbenches(wb.Name)
+			Expect(updated.Finalizers).To(ContainElement("components.platform.opendatahub.io/workbenches-cleanup"))
+
+			// Delete the CR (sets DeletionTimestamp)
+			Expect(k8sClient.Delete(ctx, updated)).To(Succeed())
+
+			// Reconcile should trigger cleanup and remove the finalizer
+			_, err = reconciler.Reconcile(ctx, requestFor(wb))
+			Expect(err).NotTo(HaveOccurred())
+
+			// Verify the deployment was deleted
+			deploys := &appsv1.DeploymentList{}
+			Expect(k8sClient.List(ctx, deploys, client.InNamespace(nsName), client.MatchingLabels{
+				metadata.ComponentLabelKey: metadata.LabelTrue,
+				metadata.PartOfLabelKey:    metadata.ComponentLabelValue,
+			})).To(Succeed())
+			Expect(deploys.Items).To(BeEmpty())
+		})
+
+		It("Should skip cleanup and complete deletion when finalizer is absent", func() {
+			nsName := "test-ns-no-finalizer"
+			createNamespace(nsName)
+			createDeployment(nsName, "should-survive", 1)
+
+			wb := createWorkbenches("Managed", nsName, "OpenDataHub")
+
+			DeferCleanup(func() {
+				cleanupWorkbenches(wb)
+				cleanupDeployments(nsName)
+				cleanupNamespace(nsName)
+			})
+
+			// First reconcile adds the workbenches finalizer
+			_, err := reconciler.Reconcile(ctx, requestFor(wb))
+			Expect(err).NotTo(HaveOccurred())
+
+			// Remove the workbenches finalizer manually (simulating it was never added)
+			// and add a temporary holder so the object isn't immediately deleted
+			updated := getWorkbenches(wb.Name)
+			controllerutil.RemoveFinalizer(updated, "components.platform.opendatahub.io/workbenches-cleanup")
+			controllerutil.AddFinalizer(updated, "test-holder")
+			Expect(k8sClient.Update(ctx, updated)).To(Succeed())
+
+			// Delete the CR (DeletionTimestamp is set, held by test-holder)
+			Expect(k8sClient.Delete(ctx, updated)).To(Succeed())
+
+			// Reconcile should see DeletionTimestamp but no workbenches finalizer,
+			// so it skips cleanup entirely. test-holder keeps the object alive.
+			result, err := reconciler.Reconcile(ctx, requestFor(wb))
+			Expect(err).NotTo(HaveOccurred())
+			Expect(result).To(Equal(ctrl.Result{}))
+
+			// The labeled deployment should still exist (no cleanup was performed)
+			deploys := &appsv1.DeploymentList{}
+			Expect(k8sClient.List(ctx, deploys, client.InNamespace(nsName), client.MatchingLabels{
+				metadata.ComponentLabelKey: metadata.LabelTrue,
+				metadata.PartOfLabelKey:    metadata.ComponentLabelValue,
+			})).To(Succeed())
+			Expect(deploys.Items).To(HaveLen(1))
+		})
+
+		It("Should handle idempotent deletion when resources are already gone", func() {
+			nsName := "test-ns-idempotent"
+			createNamespace(nsName)
+
+			wb := createWorkbenches("Managed", nsName, "OpenDataHub")
+
+			DeferCleanup(func() {
+				cleanupWorkbenches(wb)
+				cleanupNamespace(nsName)
+			})
+
+			// First reconcile adds the finalizer
+			_, err := reconciler.Reconcile(ctx, requestFor(wb))
+			Expect(err).NotTo(HaveOccurred())
+
+			updated := getWorkbenches(wb.Name)
+			Expect(updated.Finalizers).To(ContainElement("components.platform.opendatahub.io/workbenches-cleanup"))
+
+			// Delete the CR — no labeled resources exist in the namespace
+			Expect(k8sClient.Delete(ctx, updated)).To(Succeed())
+
+			// Reconcile should succeed even though there's nothing to clean up
+			result, err := reconciler.Reconcile(ctx, requestFor(wb))
 			Expect(err).NotTo(HaveOccurred())
 			Expect(result).To(Equal(ctrl.Result{}))
 		})
@@ -385,7 +548,8 @@ func createDeployment(namespace, name string, readyReplicas int32) {
 			Name:      name,
 			Namespace: namespace,
 			Labels: map[string]string{
-				"app.opendatahub.io/workbenches": "true",
+				metadata.ComponentLabelKey: metadata.LabelTrue,
+				metadata.PartOfLabelKey:    metadata.ComponentLabelValue,
 			},
 		},
 		Spec: appsv1.DeploymentSpec{
@@ -424,10 +588,15 @@ func cleanupWorkbenches(wb *componentsv1alpha1.Workbenches) {
 
 	if len(latest.Finalizers) > 0 {
 		latest.Finalizers = nil
-		ExpectWithOffset(1, k8sClient.Update(ctx, latest)).To(Succeed())
+
+		if err := k8sClient.Update(ctx, latest); err != nil {
+			ExpectWithOffset(1, client.IgnoreNotFound(err)).To(Succeed())
+
+			return
+		}
 	}
 
-	ExpectWithOffset(1, k8sClient.Delete(ctx, latest)).To(Succeed())
+	ExpectWithOffset(1, client.IgnoreNotFound(k8sClient.Delete(ctx, latest))).To(Succeed())
 }
 
 func cleanupNamespace(name string) {

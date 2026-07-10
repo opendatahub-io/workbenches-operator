@@ -34,6 +34,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
+	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
 
@@ -44,17 +45,19 @@ import (
 )
 
 const (
-	conditionTypeReady                 = "Ready"
-	conditionTypeProvisioningSucceeded = "ProvisioningSucceeded"
-	conditionTypeDegraded              = "Degraded"
-	conditionTypeDeploymentsAvailable  = "DeploymentsAvailable"
+	conditionTypeReady                    = "Ready"
+	conditionTypeProvisioningSucceeded    = "ProvisioningSucceeded"
+	conditionTypeDegraded                 = "Degraded"
+	conditionTypeDeploymentsAvailable     = "DeploymentsAvailable"
 	conditionTypeReleaseMetadataAvailable = "ReleaseMetadataAvailable"
-	phaseReady                         = "Ready"
-	phaseNotReady                      = "Not Ready"
-	requeueDelay                       = 30 * time.Second
+	phaseReady                            = "Ready"
+	phaseNotReady                         = "Not Ready"
+	requeueDelay                          = 30 * time.Second
 
 	rateLimiterBaseDelay = 5 * time.Second
 	rateLimiterMaxDelay  = 5 * time.Minute
+
+	workbenchesFinalizer = "components.platform.opendatahub.io/workbenches-cleanup"
 )
 
 // WorkbenchesReconciler reconciles a Workbenches object.
@@ -69,7 +72,8 @@ type WorkbenchesReconciler struct {
 // +kubebuilder:rbac:groups=components.platform.opendatahub.io,resources=workbenches/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=components.platform.opendatahub.io,resources=workbenches/finalizers,verbs=update
 // +kubebuilder:rbac:groups="",resources=namespaces,verbs=get;list;watch;create;update;patch
-// +kubebuilder:rbac:groups="",resources=configmaps;services;serviceaccounts,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups="",resources=configmaps;secrets;services;serviceaccounts,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups="",resources=events,verbs=create;patch
 // +kubebuilder:rbac:groups=apps,resources=deployments,verbs=get;list;watch;create;update;patch;delete
 // escalate and bind for RBAC resources are granted in a separate hand-maintained ClusterRole
 // (config/rbac/rbac_escalate_role.yaml) scoped to specific resourceNames from upstream manifests.
@@ -78,8 +82,9 @@ type WorkbenchesReconciler struct {
 // Write verbs are required because the operator creates/patches webhook configs from upstream manifests via SSA
 // and deletes them during component removal.
 // +kubebuilder:rbac:groups=admissionregistration.k8s.io,resources=mutatingwebhookconfigurations;validatingwebhookconfigurations,verbs=get;list;watch;create;update;patch;delete
-// +kubebuilder:rbac:groups=image.openshift.io,resources=imagestreams,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=kubeflow.org,resources=notebooks,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=authorization.k8s.io,resources=subjectaccessreviews,verbs=create
+// +kubebuilder:rbac:groups=image.openshift.io,resources=imagestreams,verbs=get;list;watch;create;update;patch;delete
 
 // Reconcile handles the reconciliation loop for Workbenches resources.
 func (r *WorkbenchesReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
@@ -94,6 +99,18 @@ func (r *WorkbenchesReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 
 	l.Info("reconciling Workbenches", "name", workbenches.Name, "generation", workbenches.Generation)
 
+	if !workbenches.DeletionTimestamp.IsZero() {
+		return r.reconcileDelete(ctx, workbenches)
+	}
+
+	if !controllerutil.ContainsFinalizer(workbenches, workbenchesFinalizer) {
+		controllerutil.AddFinalizer(workbenches, workbenchesFinalizer)
+
+		if err := r.Update(ctx, workbenches); err != nil {
+			return ctrl.Result{}, fmt.Errorf("failed to add finalizer: %w", err)
+		}
+	}
+
 	if workbenches.Spec.ManagementState == "Removed" {
 		return r.reconcileRemoved(ctx, workbenches)
 	}
@@ -105,6 +122,11 @@ func (r *WorkbenchesReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 // A custom rate limiter is configured with exponential backoff (5s base, 5m max)
 // to avoid tight retry loops on persistent failures like missing manifests.
 func (r *WorkbenchesReconciler) SetupWithManager(mgr ctrl.Manager) error {
+	// TODO: Add Owns() watches for managed child resources once applyObjects() sets
+	// OwnerReferences on created objects. Without owner refs, Owns() watches are
+	// ineffective because controller-runtime relies on them to map child events
+	// back to the parent Workbenches CR.
+	// See: https://github.com/opendatahub-io/workbenches-operator/issues/30
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&componentsv1alpha1.Workbenches{}, builder.WithPredicates(predicate.GenerationChangedPredicate{})).
 		Named("workbenches").
@@ -117,9 +139,38 @@ func (r *WorkbenchesReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		Complete(r)
 }
 
+func (r *WorkbenchesReconciler) reconcileDelete(ctx context.Context, wb *componentsv1alpha1.Workbenches) (ctrl.Result, error) {
+	l := log.FromContext(ctx)
+	l.Info("workbenches CR is being deleted, cleaning up managed resources")
+
+	if controllerutil.ContainsFinalizer(wb, workbenchesFinalizer) {
+		nsName := r.resolveWorkbenchNamespace(wb)
+
+		if err := r.cleanupManagedResources(ctx, nsName); err != nil {
+			l.Error(err, "failed to cleanup managed resources")
+
+			return ctrl.Result{}, err
+		}
+
+		controllerutil.RemoveFinalizer(wb, workbenchesFinalizer)
+
+		if err := r.Update(ctx, wb); err != nil {
+			return ctrl.Result{}, fmt.Errorf("failed to remove finalizer: %w", err)
+		}
+	}
+
+	return ctrl.Result{}, nil
+}
+
 func (r *WorkbenchesReconciler) reconcileRemoved(ctx context.Context, wb *componentsv1alpha1.Workbenches) (ctrl.Result, error) {
 	l := log.FromContext(ctx)
 	l.Info("workbenches management state is Removed")
+
+	nsName := r.resolveWorkbenchNamespace(wb)
+
+	if err := r.cleanupManagedResources(ctx, nsName); err != nil {
+		return r.setErrorStatus(ctx, wb, "CleanupFailed", err)
+	}
 
 	meta.SetStatusCondition(&wb.Status.Conditions, metav1.Condition{
 		Type:               conditionTypeReady,
