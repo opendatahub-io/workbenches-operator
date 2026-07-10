@@ -29,19 +29,24 @@ import (
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/util/workqueue"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
+	"sigs.k8s.io/controller-runtime/pkg/event"
+	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
+	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	componentsv1alpha1 "github.com/opendatahub-io/workbenches-operator/api/v1alpha1"
 	"github.com/opendatahub-io/workbenches-operator/internal/metadata"
 	"github.com/opendatahub-io/workbenches-operator/internal/platform"
 	"github.com/opendatahub-io/workbenches-operator/internal/releases"
+	statusutil "github.com/opendatahub-io/workbenches-operator/internal/status"
 )
 
 const (
@@ -50,8 +55,6 @@ const (
 	conditionTypeDegraded                 = "Degraded"
 	conditionTypeDeploymentsAvailable     = "DeploymentsAvailable"
 	conditionTypeReleaseMetadataAvailable = "ReleaseMetadataAvailable"
-	phaseReady                            = "Ready"
-	phaseNotReady                         = "Not Ready"
 	requeueDelay                          = 30 * time.Second
 
 	rateLimiterBaseDelay = 5 * time.Second
@@ -129,6 +132,11 @@ func (r *WorkbenchesReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	// See: https://github.com/opendatahub-io/workbenches-operator/issues/30
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&componentsv1alpha1.Workbenches{}, builder.WithPredicates(predicate.GenerationChangedPredicate{})).
+		Watches(
+			&appsv1.Deployment{},
+			handler.EnqueueRequestsFromMapFunc(r.mapComponentDeploymentToWorkbenches),
+			builder.WithPredicates(deploymentAvailabilityChangedPredicate{}),
+		).
 		Named("workbenches").
 		WithOptions(controller.Options{
 			RateLimiter: workqueue.NewTypedItemExponentialFailureRateLimiter[ctrl.Request](
@@ -137,6 +145,87 @@ func (r *WorkbenchesReconciler) SetupWithManager(mgr ctrl.Manager) error {
 			),
 		}).
 		Complete(r)
+}
+
+func (r *WorkbenchesReconciler) mapComponentDeploymentToWorkbenches(ctx context.Context, obj client.Object) []reconcile.Request {
+	deploy, ok := obj.(*appsv1.Deployment)
+	if !ok {
+		return nil
+	}
+
+	if deploy.GetLabels()[metadata.ComponentLabelKey] != metadata.LabelTrue {
+		return nil
+	}
+
+	wb := &componentsv1alpha1.Workbenches{}
+
+	err := r.Get(ctx, types.NamespacedName{Name: componentsv1alpha1.WorkbenchesInstanceName}, wb)
+	if err != nil {
+		if !errors.IsNotFound(err) {
+			log.FromContext(ctx).Error(err, "failed to get Workbenches for deployment watch")
+		}
+
+		return nil
+	}
+
+	if deploy.GetNamespace() != r.resolveWorkbenchNamespace(wb) {
+		return nil
+	}
+
+	return []reconcile.Request{{
+		NamespacedName: types.NamespacedName{Name: componentsv1alpha1.WorkbenchesInstanceName},
+	}}
+}
+
+type deploymentAvailabilityChangedPredicate struct{}
+
+func (deploymentAvailabilityChangedPredicate) Create(e event.CreateEvent) bool {
+	return hasComponentLabel(e.Object)
+}
+
+func (deploymentAvailabilityChangedPredicate) Update(e event.UpdateEvent) bool {
+	oldHasLabel := hasComponentLabel(e.ObjectOld)
+	newHasLabel := hasComponentLabel(e.ObjectNew)
+	if oldHasLabel != newHasLabel {
+		return true
+	}
+
+	if !newHasLabel {
+		return false
+	}
+
+	oldDeploy, oldOK := e.ObjectOld.(*appsv1.Deployment)
+	newDeploy, newOK := e.ObjectNew.(*appsv1.Deployment)
+	if !oldOK || !newOK {
+		return true
+	}
+
+	oldDesired := deploymentDesiredReplicas(oldDeploy)
+	newDesired := deploymentDesiredReplicas(newDeploy)
+
+	return oldDeploy.Status.ReadyReplicas != newDeploy.Status.ReadyReplicas ||
+		oldDeploy.Status.AvailableReplicas != newDeploy.Status.AvailableReplicas ||
+		oldDesired != newDesired
+}
+
+func (deploymentAvailabilityChangedPredicate) Delete(e event.DeleteEvent) bool {
+	return hasComponentLabel(e.Object)
+}
+
+func (deploymentAvailabilityChangedPredicate) Generic(_ event.GenericEvent) bool {
+	return false
+}
+
+func hasComponentLabel(obj client.Object) bool {
+	return obj.GetLabels()[metadata.ComponentLabelKey] == metadata.LabelTrue
+}
+
+func deploymentDesiredReplicas(deploy *appsv1.Deployment) int32 {
+	if deploy.Spec.Replicas == nil {
+		return 1
+	}
+
+	return *deploy.Spec.Replicas
 }
 
 func (r *WorkbenchesReconciler) reconcileDelete(ctx context.Context, wb *componentsv1alpha1.Workbenches) (ctrl.Result, error) {
@@ -188,7 +277,7 @@ func (r *WorkbenchesReconciler) reconcileRemoved(ctx context.Context, wb *compon
 		ObservedGeneration: wb.Generation,
 	})
 
-	wb.Status.Phase = phaseNotReady
+	wb.Status.Phase = statusutil.ComputePhase(statusutil.PhaseContext{Removed: true})
 	wb.Status.Releases = nil
 	wb.Status.ObservedGeneration = wb.Generation
 
@@ -210,6 +299,25 @@ func (r *WorkbenchesReconciler) populateReleases(wb *componentsv1alpha1.Workbenc
 
 func (r *WorkbenchesReconciler) reconcileManaged(ctx context.Context, wb *componentsv1alpha1.Workbenches) (ctrl.Result, error) {
 	l := log.FromContext(ctx)
+
+	phaseCtx := statusutil.PhaseContext{
+		PreviousObservedGeneration: wb.Status.ObservedGeneration,
+		Generation:                 wb.Generation,
+		WasReady:                   meta.IsStatusConditionTrue(wb.Status.Conditions, conditionTypeReady),
+	}
+
+	if wb.Status.Phase == "" && wb.Status.ObservedGeneration == 0 {
+		wb.Status.Phase = statusutil.PhasePending
+
+		if err := r.Status().Update(ctx, wb); err != nil {
+			l.Error(err, "failed to update Pending status")
+
+			return ctrl.Result{RequeueAfter: requeueDelay}, err
+		}
+
+		// Requeue immediately to continue provisioning after the first Pending status write.
+		return ctrl.Result{Requeue: true}, nil
+	}
 
 	if err := validateSpec(wb.Spec); err != nil {
 		return r.setErrorStatus(ctx, wb, "InvalidSpec", err)
@@ -263,7 +371,12 @@ func (r *WorkbenchesReconciler) reconcileManaged(ctx context.Context, wb *compon
 
 	wb.Status.WorkbenchNamespace = nsName
 	wb.Status.ObservedGeneration = wb.Generation
-	r.setReadyCondition(wb, deploymentsReady, deployMsg)
+	r.setReadyCondition(wb, deploymentsReady, deployMsg, phaseCtx.WasReady)
+
+	phaseCtx.Ready = meta.IsStatusConditionTrue(wb.Status.Conditions, conditionTypeReady)
+	phaseCtx.Degraded = meta.IsStatusConditionTrue(wb.Status.Conditions, conditionTypeDegraded)
+	phaseCtx.ProvisioningSucceeded = meta.IsStatusConditionTrue(wb.Status.Conditions, conditionTypeProvisioningSucceeded)
+	wb.Status.Phase = statusutil.ComputePhase(phaseCtx)
 
 	err := r.Status().Update(ctx, wb)
 	if err != nil {
@@ -301,7 +414,12 @@ func (r *WorkbenchesReconciler) setDeploymentCondition(wb *componentsv1alpha1.Wo
 	}
 }
 
-func (r *WorkbenchesReconciler) setReadyCondition(wb *componentsv1alpha1.Workbenches, deploymentsReady bool, deployMsg string) {
+func (r *WorkbenchesReconciler) setReadyCondition(
+	wb *componentsv1alpha1.Workbenches,
+	deploymentsReady bool,
+	deployMsg string,
+	wasReady bool,
+) {
 	if deploymentsReady {
 		meta.SetStatusCondition(&wb.Status.Conditions, metav1.Condition{
 			Type:               conditionTypeReady,
@@ -319,17 +437,25 @@ func (r *WorkbenchesReconciler) setReadyCondition(wb *componentsv1alpha1.Workben
 			ObservedGeneration: wb.Generation,
 		})
 
-		wb.Status.Phase = phaseReady
-	} else {
+		return
+	}
+
+	meta.SetStatusCondition(&wb.Status.Conditions, metav1.Condition{
+		Type:               conditionTypeReady,
+		Status:             metav1.ConditionFalse,
+		Reason:             "DeploymentsNotReady",
+		Message:            deployMsg,
+		ObservedGeneration: wb.Generation,
+	})
+
+	if wasReady {
 		meta.SetStatusCondition(&wb.Status.Conditions, metav1.Condition{
-			Type:               conditionTypeReady,
-			Status:             metav1.ConditionFalse,
+			Type:               conditionTypeDegraded,
+			Status:             metav1.ConditionTrue,
 			Reason:             "DeploymentsNotReady",
 			Message:            deployMsg,
 			ObservedGeneration: wb.Generation,
 		})
-
-		wb.Status.Phase = phaseNotReady
 	}
 }
 
@@ -427,19 +553,7 @@ func (r *WorkbenchesReconciler) checkDeployments(ctx context.Context, wb *compon
 		return false, "no notebook controller deployments found"
 	}
 
-	for i := range deployments.Items {
-		d := &deployments.Items[i]
-		desired := int32(1)
-		if d.Spec.Replicas != nil {
-			desired = *d.Spec.Replicas
-		}
-		if d.Status.ReadyReplicas < desired {
-			return false, fmt.Sprintf("deployment %s/%s has %d/%d ready replicas",
-				d.Namespace, d.Name, d.Status.ReadyReplicas, desired)
-		}
-	}
-
-	return true, ""
+	return deploymentsAvailability(deployments.Items)
 }
 
 func (r *WorkbenchesReconciler) setErrorStatus(
@@ -456,7 +570,7 @@ func (r *WorkbenchesReconciler) setErrorStatus(
 		ObservedGeneration: wb.Generation,
 	})
 
-	wb.Status.Phase = phaseNotReady
+	wb.Status.Phase = statusutil.ComputePhase(statusutil.PhaseContext{Failed: true})
 	wb.Status.ObservedGeneration = wb.Generation
 
 	if err := r.Status().Update(ctx, wb); err != nil {
@@ -464,4 +578,31 @@ func (r *WorkbenchesReconciler) setErrorStatus(
 	}
 
 	return ctrl.Result{}, reconcileErr
+}
+
+// deploymentsAvailability reports whether all component deployments have the desired
+// number of ready replicas. A deployment scaled to zero is treated as unavailable.
+func deploymentsAvailability(deployments []appsv1.Deployment) (bool, string) {
+	if len(deployments) == 0 {
+		return false, "no notebook controller deployments found"
+	}
+
+	for i := range deployments {
+		d := &deployments[i]
+		desired := int32(1)
+		if d.Spec.Replicas != nil {
+			desired = *d.Spec.Replicas
+		}
+
+		if desired < 1 {
+			return false, fmt.Sprintf("deployment %s/%s is scaled to zero", d.Namespace, d.Name)
+		}
+
+		if d.Status.ReadyReplicas < desired {
+			return false, fmt.Sprintf("deployment %s/%s has %d/%d ready replicas",
+				d.Namespace, d.Name, d.Status.ReadyReplicas, desired)
+		}
+	}
+
+	return true, ""
 }

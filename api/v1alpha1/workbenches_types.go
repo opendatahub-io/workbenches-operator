@@ -91,7 +91,8 @@ type WorkbenchesStatus struct {
 	// observedGeneration is the most recent generation observed by the controller.
 	ObservedGeneration int64 `json:"observedGeneration,omitempty"`
 
-	// phase is the overall phase of the component ("Ready" or "Not Ready").
+	// phase is the overall lifecycle phase of the component.
+	// +kubebuilder:validation:Enum=Pending;Initializing;Ready;Upgrading;Degraded;Failed
 	Phase string `json:"phase,omitempty"`
 
 	// workbenchNamespace reflects the active workbench namespace.

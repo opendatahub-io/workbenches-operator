@@ -169,8 +169,14 @@ spec:
                 format: int64
                 type: integer
               phase:
-                description: phase is the overall phase of the component ("Ready"
-                  or "Not Ready").
+                description: phase is the overall lifecycle phase of the component.
+                enum:
+                - Pending
+                - Initializing
+                - Ready
+                - Upgrading
+                - Degraded
+                - Failed
                 type: string
               releases:
                 description: releases tracks the deployed component versions.
