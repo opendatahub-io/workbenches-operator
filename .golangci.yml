@@ -10,9 +10,17 @@ linters:
       - linters:
           - lll
         source: "kubebuilder:webhook:|webhook:path="
+      - linters:
+          - goconst
+          - gocognit
+          - nestif
+        path: _test\.go
+  enable:
+    - gomodguard_v2
   disable:
     - cyclop
     - depguard
+    - gomodguard
     - exhaustruct
     - funlen
     - gochecknoglobals
@@ -28,12 +36,15 @@ linters:
     - testpackage
     - varnamelen
     - wrapcheck
+    - err113
     - wsl
     - wsl_v5
 
   settings:
     errcheck:
       check-type-assertions: true
+    goconst:
+      min-occurrences: 5
     govet:
       enable-all: true
       disable:
