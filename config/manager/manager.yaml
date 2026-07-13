@@ -54,6 +54,9 @@ spec:
         - containerPort: 8081
           name: health
           protocol: TCP
+        env:
+        - name: APPLICATIONS_NAMESPACE
+          value: opendatahub
         livenessProbe:
           httpGet:
             path: /healthz

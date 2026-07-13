@@ -35,6 +35,7 @@ import (
 
 	componentsv1alpha1 "github.com/opendatahub-io/workbenches-operator/api/v1alpha1"
 	"github.com/opendatahub-io/workbenches-operator/internal/controller"
+	"github.com/opendatahub-io/workbenches-operator/internal/platform"
 	"github.com/opendatahub-io/workbenches-operator/internal/webhook"
 )
 
@@ -129,10 +130,16 @@ func main() {
 		os.Exit(1)
 	}
 
+	applicationsNamespace := os.Getenv("APPLICATIONS_NAMESPACE")
+	if applicationsNamespace == "" {
+		applicationsNamespace = platform.DefaultNotebooksNamespaceODH
+	}
+
 	if err = (&controller.WorkbenchesReconciler{
-		Client:            mgr.GetClient(),
-		Scheme:            mgr.GetScheme(),
-		ManifestsBasePath: manifestsBasePath,
+		Client:                mgr.GetClient(),
+		Scheme:                mgr.GetScheme(),
+		ManifestsBasePath:     manifestsBasePath,
+		ApplicationsNamespace: applicationsNamespace,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "Workbenches")
 		os.Exit(1)

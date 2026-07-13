@@ -45,6 +45,7 @@ import (
 	componentsv1alpha1 "github.com/opendatahub-io/workbenches-operator/api/v1alpha1"
 	"github.com/opendatahub-io/workbenches-operator/internal/metadata"
 	"github.com/opendatahub-io/workbenches-operator/internal/platform"
+	"github.com/opendatahub-io/workbenches-operator/internal/platformconfig"
 	"github.com/opendatahub-io/workbenches-operator/internal/releases"
 	statusutil "github.com/opendatahub-io/workbenches-operator/internal/status"
 )
@@ -71,8 +72,9 @@ const (
 type WorkbenchesReconciler struct {
 	client.Client
 
-	Scheme            *runtime.Scheme
-	ManifestsBasePath string
+	Scheme                *runtime.Scheme
+	ManifestsBasePath     string
+	ApplicationsNamespace string
 }
 
 // +kubebuilder:rbac:groups=components.platform.opendatahub.io,resources=workbenches,verbs=get;list;watch;create;update;patch;delete
@@ -140,6 +142,11 @@ func (r *WorkbenchesReconciler) SetupWithManager(mgr ctrl.Manager) error {
 			&appsv1.Deployment{},
 			handler.EnqueueRequestsFromMapFunc(r.mapComponentDeploymentToWorkbenches),
 			builder.WithPredicates(deploymentAvailabilityChangedPredicate{}),
+		).
+		Watches(
+			&corev1.ConfigMap{},
+			handler.EnqueueRequestsFromMapFunc(r.mapPlatformConfigToWorkbenches),
+			builder.WithPredicates(newPlatformConfigChangedPredicate(r.ApplicationsNamespace)),
 		).
 		Named("workbenches").
 		WithOptions(controller.Options{
@@ -232,6 +239,74 @@ func deploymentDesiredReplicas(deploy *appsv1.Deployment) int32 {
 	return *deploy.Spec.Replicas
 }
 
+func (r *WorkbenchesReconciler) mapPlatformConfigToWorkbenches(_ context.Context, obj client.Object) []reconcile.Request {
+	cm, ok := obj.(*corev1.ConfigMap)
+	if !ok {
+		return nil
+	}
+
+	if cm.GetName() != platformconfig.ConfigMapName || cm.GetNamespace() != r.ApplicationsNamespace {
+		return nil
+	}
+
+	return []reconcile.Request{{
+		NamespacedName: types.NamespacedName{Name: componentsv1alpha1.WorkbenchesInstanceName},
+	}}
+}
+
+type platformConfigChangedPredicate struct {
+	applicationsNamespace string
+}
+
+func newPlatformConfigChangedPredicate(applicationsNamespace string) platformConfigChangedPredicate {
+	return platformConfigChangedPredicate{applicationsNamespace: applicationsNamespace}
+}
+
+func (p platformConfigChangedPredicate) Create(e event.CreateEvent) bool {
+	return p.matches(e.Object)
+}
+
+func (p platformConfigChangedPredicate) Update(e event.UpdateEvent) bool {
+	if !p.matches(e.ObjectNew) {
+		return false
+	}
+
+	oldCM, oldOK := e.ObjectOld.(*corev1.ConfigMap)
+	newCM, newOK := e.ObjectNew.(*corev1.ConfigMap)
+	if !oldOK || !newOK {
+		return true
+	}
+
+	oldVersion := ""
+	if oldCM.Data != nil {
+		oldVersion = oldCM.Data[platformconfig.VersionDataKey]
+	}
+
+	newVersion := ""
+	if newCM.Data != nil {
+		newVersion = newCM.Data[platformconfig.VersionDataKey]
+	}
+
+	return oldVersion != newVersion
+}
+
+func (p platformConfigChangedPredicate) Delete(e event.DeleteEvent) bool {
+	return p.matches(e.Object)
+}
+
+func (p platformConfigChangedPredicate) Generic(_ event.GenericEvent) bool {
+	return false
+}
+
+func (p platformConfigChangedPredicate) matches(obj client.Object) bool {
+	cm, ok := obj.(*corev1.ConfigMap)
+	if !ok {
+		return false
+	}
+
+	return cm.GetName() == platformconfig.ConfigMapName && cm.GetNamespace() == p.applicationsNamespace
+}
+
 func (r *WorkbenchesReconciler) reconcileDelete(ctx context.Context, wb *componentsv1alpha1.Workbenches) (ctrl.Result, error) {
 	l := log.FromContext(ctx)
 	l.Info("workbenches CR is being deleted, cleaning up managed resources")
@@ -291,12 +366,14 @@ func (r *WorkbenchesReconciler) reconcileRemoved(ctx context.Context, wb *compon
 }
 
 func (r *WorkbenchesReconciler) populateReleases(wb *componentsv1alpha1.Workbenches) error {
+	platformRelease := platformconfig.GetPlatformRelease(wb.Status.Releases)
+
 	componentReleases, err := releases.CollectWorkbenchesReleases(r.ManifestsBasePath)
 	if err != nil {
 		return fmt.Errorf("collecting component releases: %w", err)
 	}
 
-	wb.Status.Releases = componentReleases
+	wb.Status.Releases = platformconfig.MergeComponentReleases(componentReleases, platformRelease)
 
 	return nil
 }
@@ -327,6 +404,11 @@ func (r *WorkbenchesReconciler) reconcileManaged(ctx context.Context, wb *compon
 		return r.setErrorStatus(ctx, wb, "InvalidSpec", err)
 	}
 
+	platformVersion, err := r.readPlatformVersion(ctx)
+	if err != nil {
+		return r.setErrorStatus(ctx, wb, "PlatformVersionReadFailed", err)
+	}
+
 	if err := r.configureDependencies(ctx, wb); err != nil {
 		return r.setErrorStatus(ctx, wb, "ConfigureDependenciesFailed", err)
 	}
@@ -344,7 +426,8 @@ func (r *WorkbenchesReconciler) reconcileManaged(ctx context.Context, wb *compon
 		// Release metadata is informational; a missing or malformed
 		// component_metadata.yaml must not block a successful deploy.
 		l.Error(err, "failed to populate release metadata; continuing with empty releases")
-		wb.Status.Releases = nil
+		platformRelease := platformconfig.GetPlatformRelease(wb.Status.Releases)
+		wb.Status.Releases = platformconfig.MergeComponentReleases(nil, platformRelease)
 		meta.SetStatusCondition(&wb.Status.Conditions, metav1.Condition{
 			Type:               conditionTypeReleaseMetadataAvailable,
 			Status:             metav1.ConditionFalse,
@@ -373,16 +456,31 @@ func (r *WorkbenchesReconciler) reconcileManaged(ctx context.Context, wb *compon
 	deploymentsReady, deployMsg := r.checkDeployments(ctx, wb)
 	r.setDeploymentCondition(wb, deploymentsReady, deployMsg)
 
+	currentPlatformVersion := platformconfig.GetPlatformRelease(wb.Status.Releases).Version
+	wasPlatformVersionPending := false
+	if readyCond := meta.FindStatusCondition(wb.Status.Conditions, conditionTypeReady); readyCond != nil {
+		wasPlatformVersionPending = readyCond.Reason == "PlatformVersionPending"
+	}
+
+	r.setReadyCondition(wb, deploymentsReady, deployMsg, phaseCtx.WasReady, platformVersion, currentPlatformVersion)
+
+	if deploymentsReady &&
+		platformVersion != "" &&
+		currentPlatformVersion != platformVersion &&
+		(currentPlatformVersion == "" || wasPlatformVersionPending) {
+		platformconfig.SetPlatformRelease(&wb.Status.Releases, platformVersion)
+		r.setReadyCondition(wb, deploymentsReady, deployMsg, phaseCtx.WasReady, platformVersion, platformVersion)
+	}
+
 	wb.Status.WorkbenchNamespace = nsName
 	wb.Status.ObservedGeneration = wb.Generation
-	r.setReadyCondition(wb, deploymentsReady, deployMsg, phaseCtx.WasReady)
 
 	phaseCtx.Ready = meta.IsStatusConditionTrue(wb.Status.Conditions, conditionTypeReady)
 	phaseCtx.Degraded = meta.IsStatusConditionTrue(wb.Status.Conditions, conditionTypeDegraded)
 	phaseCtx.ProvisioningSucceeded = meta.IsStatusConditionTrue(wb.Status.Conditions, conditionTypeProvisioningSucceeded)
 	wb.Status.Phase = statusutil.ComputePhase(phaseCtx)
 
-	err := r.Status().Update(ctx, wb)
+	err = r.Status().Update(ctx, wb)
 	if err != nil {
 		l.Error(err, "failed to update Workbenches status")
 
@@ -391,7 +489,7 @@ func (r *WorkbenchesReconciler) reconcileManaged(ctx context.Context, wb *compon
 
 	l.Info("reconciliation complete", "phase", wb.Status.Phase)
 
-	if !deploymentsReady {
+	if !deploymentsReady || !platformconfig.HandshakeComplete(platformVersion, wb.Status.Releases) {
 		return ctrl.Result{RequeueAfter: requeueDelay}, nil
 	}
 
@@ -423,8 +521,13 @@ func (r *WorkbenchesReconciler) setReadyCondition(
 	deploymentsReady bool,
 	deployMsg string,
 	wasReady bool,
+	platformVersion string,
+	reconciledPlatformVersion string,
 ) {
-	if deploymentsReady {
+	handshakeComplete := platformVersion != "" && reconciledPlatformVersion == platformVersion
+	ready := deploymentsReady && handshakeComplete
+
+	if ready {
 		meta.SetStatusCondition(&wb.Status.Conditions, metav1.Condition{
 			Type:               conditionTypeReady,
 			Status:             metav1.ConditionTrue,
@@ -444,15 +547,39 @@ func (r *WorkbenchesReconciler) setReadyCondition(
 		return
 	}
 
+	readyMsg := deployMsg
+	readyReason := "DeploymentsNotReady"
+
+	if deploymentsReady {
+		readyReason = "PlatformVersionPending"
+		if platformVersion == "" {
+			readyMsg = "waiting for platform version from odh-workbenches-config"
+		} else {
+			readyMsg = fmt.Sprintf(
+				"platform upgrade in progress: reconciled %q, target %q",
+				reconciledPlatformVersion,
+				platformVersion,
+			)
+		}
+
+		meta.SetStatusCondition(&wb.Status.Conditions, metav1.Condition{
+			Type:               conditionTypeDegraded,
+			Status:             metav1.ConditionFalse,
+			Reason:             "NotDegraded",
+			Message:            "Workbenches component is operating normally",
+			ObservedGeneration: wb.Generation,
+		})
+	}
+
 	meta.SetStatusCondition(&wb.Status.Conditions, metav1.Condition{
 		Type:               conditionTypeReady,
 		Status:             metav1.ConditionFalse,
-		Reason:             "DeploymentsNotReady",
-		Message:            deployMsg,
+		Reason:             readyReason,
+		Message:            readyMsg,
 		ObservedGeneration: wb.Generation,
 	})
 
-	if wasReady {
+	if wasReady && !deploymentsReady {
 		meta.SetStatusCondition(&wb.Status.Conditions, metav1.Condition{
 			Type:               conditionTypeDegraded,
 			Status:             metav1.ConditionTrue,
@@ -523,6 +650,10 @@ func (r *WorkbenchesReconciler) resolveWorkbenchNamespace(wb *componentsv1alpha1
 	}
 
 	return platform.DefaultNotebooksNamespace(wb.Spec.Platform)
+}
+
+func (r *WorkbenchesReconciler) readPlatformVersion(ctx context.Context) (string, error) {
+	return platformconfig.ReadPlatformVersion(ctx, r.Client, r.ApplicationsNamespace)
 }
 
 func (r *WorkbenchesReconciler) computeKustomizeParams(wb *componentsv1alpha1.Workbenches) map[string]string {
