@@ -19,8 +19,8 @@ package main
 
 import (
 	"crypto/tls"
+	"errors"
 	"flag"
-	"fmt"
 	"os"
 
 	"k8s.io/apimachinery/pkg/runtime"
@@ -89,7 +89,7 @@ func main() {
 	}
 
 	if !info.IsDir() {
-		setupLog.Error(fmt.Errorf("path exists but is not a directory"), "invalid manifests-base-path", "path", manifestsBasePath)
+		setupLog.Error(errors.New("path exists but is not a directory"), "invalid manifests-base-path", "path", manifestsBasePath)
 		os.Exit(1)
 	}
 

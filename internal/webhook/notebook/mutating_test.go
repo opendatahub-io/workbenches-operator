@@ -211,7 +211,7 @@ func TestNotebookWebhook_Handle_BasicValidation(t *testing.T) {
 		{
 			name: "invalid annotation format - empty name",
 			annotations: map[string]string{
-				metadata.ConnectionAnnotation: fmt.Sprintf("%s/", testNamespace),
+				metadata.ConnectionAnnotation: testNamespace + "/",
 			},
 			expectedAllowed:    false,
 			expectedMessage:    "failed to parse connections annotation",
@@ -220,7 +220,7 @@ func TestNotebookWebhook_Handle_BasicValidation(t *testing.T) {
 		{
 			name: "invalid annotation format - empty namespace",
 			annotations: map[string]string{
-				metadata.ConnectionAnnotation: fmt.Sprintf("/%s", testSecret1),
+				metadata.ConnectionAnnotation: "/" + testSecret1,
 			},
 			expectedAllowed:    false,
 			expectedMessage:    "failed to parse connections annotation",
