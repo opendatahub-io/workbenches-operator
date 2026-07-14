@@ -61,6 +61,10 @@ const (
 	rateLimiterMaxDelay  = 5 * time.Minute
 
 	workbenchesFinalizer = "components.platform.opendatahub.io/workbenches-cleanup"
+
+	paramGatewayURL    = "gateway-url"
+	paramMLflowEnabled = "mlflow-enabled"
+	paramSectionTitle  = "section-title"
 )
 
 // WorkbenchesReconciler reconciles a Workbenches object.
@@ -528,9 +532,9 @@ func (r *WorkbenchesReconciler) computeKustomizeParams(wb *componentsv1alpha1.Wo
 	}
 
 	return map[string]string{
-		"section-title":  platform.SectionTitle(wb.Spec.Platform),
-		"mlflow-enabled": strconv.FormatBool(wb.Spec.MLflowEnabled),
-		"gateway-url":    gatewayURL,
+		paramSectionTitle:  platform.SectionTitle(wb.Spec.Platform),
+		paramMLflowEnabled: strconv.FormatBool(wb.Spec.MLflowEnabled),
+		paramGatewayURL:    gatewayURL,
 	}
 }
 

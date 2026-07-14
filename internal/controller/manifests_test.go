@@ -91,9 +91,9 @@ func TestWriteParamsEnv(t *testing.T) {
 	}
 
 	params := map[string]string{
-		"gateway-url":    "https://gw.example.com",
-		"section-title":  "OpenShift AI",
-		"mlflow-enabled": "true",
+		paramGatewayURL:    "https://gw.example.com",
+		paramSectionTitle:  "OpenShift AI",
+		paramMLflowEnabled: "true",
 	}
 
 	if err := writeParamsEnv(fSys, dir, params); err != nil {
@@ -137,8 +137,8 @@ func TestWriteParamsEnvMergesWithExisting(t *testing.T) {
 	}
 
 	params := map[string]string{
-		"gateway-url":    "https://gw.example.com",
-		"mlflow-enabled": "true",
+		paramGatewayURL:    "https://gw.example.com",
+		paramMLflowEnabled: "true",
 	}
 
 	if err := writeParamsEnv(fSys, dir, params); err != nil {
@@ -399,7 +399,7 @@ configMapGenerator:
 	}
 
 	params := map[string]string{
-		"section-title": "Red Hat OpenShift AI",
+		paramSectionTitle: "Red Hat OpenShift AI",
 	}
 
 	objects, err := renderKustomize(dir, params)
@@ -422,8 +422,8 @@ configMapGenerator:
 				t.Fatal("generated ConfigMap missing data field")
 			}
 
-			if data["section-title"] != "Red Hat OpenShift AI" {
-				t.Errorf("expected section-title=%q, got %q", "Red Hat OpenShift AI", data["section-title"])
+			if data[paramSectionTitle] != "Red Hat OpenShift AI" {
+				t.Errorf("expected section-title=%q, got %q", "Red Hat OpenShift AI", data[paramSectionTitle])
 			}
 		}
 	}
@@ -623,7 +623,7 @@ resources:
 		_ = os.Chmod(srcDir, 0o700) //nolint:gosec // restore permissions for t.TempDir cleanup
 	})
 
-	_, err := renderKustomize(srcDir, map[string]string{"section-title": "Test"})
+	_, err := renderKustomize(srcDir, map[string]string{paramSectionTitle: "Test"})
 	if err == nil {
 		t.Fatal("expected error when rendering directly into read-only directory")
 	}
@@ -635,7 +635,7 @@ resources:
 		t.Fatalf("copyDir() from read-only source failed: %v", cpErr)
 	}
 
-	objects, err := renderKustomize(renderDir, map[string]string{"section-title": "Test"})
+	objects, err := renderKustomize(renderDir, map[string]string{paramSectionTitle: "Test"})
 	if err != nil {
 		t.Fatalf("renderKustomize() on copied dir error = %v", err)
 	}
@@ -708,9 +708,9 @@ func TestRenderRealManifests(t *testing.T) {
 	}
 
 	params := map[string]string{
-		"section-title":  "Test",
-		"mlflow-enabled": "false",
-		"gateway-url":    "",
+		paramSectionTitle:  "Test",
+		paramMLflowEnabled: "false",
+		paramGatewayURL:    "",
 	}
 
 	for _, p := range platforms {
