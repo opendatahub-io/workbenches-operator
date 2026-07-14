@@ -306,7 +306,7 @@ func TestIsNamespaced(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.kind, func(t *testing.T) {
 			obj := &unstructured.Unstructured{}
-			obj.Object = map[string]interface{}{
+			obj.Object = map[string]any{
 				"kind": tt.kind,
 			}
 

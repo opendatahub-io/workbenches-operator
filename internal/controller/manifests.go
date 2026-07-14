@@ -193,7 +193,7 @@ func writeParamsEnv(fSys filesys.FileSystem, kustomizeDir string, params map[str
 	var orderedKeys []string
 
 	if data, err := fSys.ReadFile(paramsPath); err == nil {
-		for _, line := range strings.Split(string(data), "\n") {
+		for line := range strings.SplitSeq(string(data), "\n") {
 			line = strings.TrimSpace(line)
 			if line == "" || strings.HasPrefix(line, "#") {
 				continue
@@ -432,7 +432,7 @@ func ensureKustomization(fSys filesys.FileSystem, dir string) error {
 		}
 	}
 
-	node, err := yaml.FromMap(map[string]interface{}{
+	node, err := yaml.FromMap(map[string]any{
 		"apiVersion": kustomization.APIVersion,
 		"kind":       kustomization.Kind,
 		"resources":  kustomization.Resources,
