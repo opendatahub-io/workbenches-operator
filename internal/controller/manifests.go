@@ -125,6 +125,10 @@ func copyDir(src, dst string) error {
 
 		target := filepath.Join(dst, rel)
 
+		if !strings.HasPrefix(filepath.Clean(target), filepath.Clean(dst)+string(os.PathSeparator)) && filepath.Clean(target) != filepath.Clean(dst) {
+			return fmt.Errorf("path traversal detected: %s escapes destination %s", target, dst)
+		}
+
 		if d.IsDir() {
 			return os.MkdirAll(target, 0o700)
 		}
@@ -138,7 +142,7 @@ func copyDir(src, dst string) error {
 			return fmt.Errorf("failed to read %s: %w", path, err)
 		}
 
-		return os.WriteFile(target, data, 0o600)
+		return os.WriteFile(filepath.Clean(target), data, 0o600) //nolint:gosec // target is validated above to stay within dst
 	})
 }
 
