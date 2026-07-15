@@ -186,6 +186,8 @@ deploy: manifests kustomize ## Deploy controller to the K8s cluster specified in
 
 .PHONY: undeploy
 undeploy: kustomize ## Undeploy controller from the K8s cluster specified in ~/.kube/config.
+	@# Delete Workbenches CRs first so the running operator can process finalizers
+	kubectl delete workbenches --all --timeout=60s
 	"$(KUSTOMIZE)" build config/default | kubectl delete --ignore-not-found=$(ignore-not-found) -f -
 
 ##@ Dependencies
