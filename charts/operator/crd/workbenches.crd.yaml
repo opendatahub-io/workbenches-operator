@@ -203,8 +203,8 @@ spec:
             type: object
         type: object
         x-kubernetes-validations:
-        - message: Workbenches name must be default
-          rule: self.metadata.name == 'default'
+        - message: Workbenches name must be default-workbenches
+          rule: self.metadata.name == 'default-workbenches'
     served: true
     storage: true
     subresources:

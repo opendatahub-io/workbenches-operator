@@ -23,7 +23,7 @@ import (
 // Workbenches component constants.
 const (
 	WorkbenchesComponentName = "workbenches"
-	WorkbenchesInstanceName  = "default"
+	WorkbenchesInstanceName  = "default-" + WorkbenchesComponentName
 	WorkbenchesKind          = "Workbenches"
 )
 
@@ -102,7 +102,7 @@ type WorkbenchesStatus struct {
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
 // +kubebuilder:resource:scope=Cluster
-// +kubebuilder:validation:XValidation:rule="self.metadata.name == 'default'",message="Workbenches name must be default"
+// +kubebuilder:validation:XValidation:rule="self.metadata.name == 'default-workbenches'",message="Workbenches name must be default-workbenches"
 // +kubebuilder:printcolumn:name="Ready",type=string,JSONPath=`.status.conditions[?(@.type=="Ready")].status`,description="Ready"
 // +kubebuilder:printcolumn:name="Reason",type=string,JSONPath=`.status.conditions[?(@.type=="Ready")].reason`,description="Reason"
 // +kubebuilder:printcolumn:name="Phase",type=string,JSONPath=`.status.phase`,description="Phase"
