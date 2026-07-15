@@ -19,6 +19,27 @@ webhooks:
       service:
         name: {{ include "workbenches-operator.webhookServiceName" . }}
         namespace: {{ .Values.operatorNamespace | quote }}
+        path: /workbenches-hardware-profile
+    failurePolicy: Fail
+    name: hardwareprofile-notebook-injector.opendatahub.io
+    rules:
+      - apiGroups:
+          - kubeflow.org
+        apiVersions:
+          - v1
+        operations:
+          - CREATE
+          - UPDATE
+        resources:
+          - notebooks
+    sideEffects: None
+    timeoutSeconds: 5
+  - admissionReviewVersions:
+      - v1
+    clientConfig:
+      service:
+        name: {{ include "workbenches-operator.webhookServiceName" . }}
+        namespace: {{ .Values.operatorNamespace | quote }}
         path: /workbenches-connection-notebook
     failurePolicy: Fail
     name: connection-notebook.opendatahub.io

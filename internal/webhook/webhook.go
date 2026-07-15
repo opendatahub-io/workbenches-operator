@@ -23,6 +23,7 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 
+	hardwareprofilewebhook "github.com/opendatahub-io/workbenches-operator/internal/webhook/hardwareprofile"
 	notebookwebhook "github.com/opendatahub-io/workbenches-operator/internal/webhook/notebook"
 )
 
@@ -37,6 +38,7 @@ type webhookEntry struct {
 func RegisterAllWebhooks(mgr ctrl.Manager) error {
 	entries := []webhookEntry{
 		{name: "notebook-connection", register: notebookwebhook.RegisterWebhooks},
+		{name: "hardwareprofile", register: hardwareprofilewebhook.RegisterWebhooks},
 	}
 
 	for _, e := range entries {

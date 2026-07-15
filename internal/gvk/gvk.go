@@ -35,7 +35,7 @@ var ImageStream = schema.GroupVersionKind{
 
 // HardwareProfile is the GVK for ODH HardwareProfile resources.
 var HardwareProfile = schema.GroupVersionKind{
-	Group:   "infrastructure.platform.opendatahub.io",
+	Group:   "infrastructure.opendatahub.io",
 	Version: "v1",
 	Kind:    "HardwareProfile",
 }

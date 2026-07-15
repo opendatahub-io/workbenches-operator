@@ -120,6 +120,12 @@ rules:
       - update
       - watch
   - apiGroups:
+      - infrastructure.opendatahub.io
+    resources:
+      - hardwareprofiles
+    verbs:
+      - get
+  - apiGroups:
       - kubeflow.org
     resources:
       - notebooks

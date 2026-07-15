@@ -72,7 +72,7 @@ resources:
     cpu: 10m
     memory: 128Mi
 
-# Webhook configuration for the notebook connection mutating webhook.
+# Webhook configuration for the notebook connection and hardware profile mutating webhooks.
 webhooks:
   enabled: true
   port: 9443
