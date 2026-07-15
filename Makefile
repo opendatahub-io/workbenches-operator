@@ -162,7 +162,7 @@ helm-undeploy: ## Uninstall operator Helm release and Workbenches CRD from ~/.ku
 	else \
 		echo "Release $(HELM_RELEASE) not found in namespace $(HELM_NAMESPACE) — skipping uninstall"; \
 	fi
-	kubectl delete crd workbenches.components.platform.opendatahub.io --ignore-not-found=$(ignore-not-found)
+	"$(KUBECTL)" delete crd workbenches.components.platform.opendatahub.io --ignore-not-found=$(ignore-not-found)
 
 
 ##@ Deployment
@@ -173,22 +173,22 @@ endif
 
 .PHONY: install
 install: manifests kustomize ## Install CRDs into the K8s cluster specified in ~/.kube/config.
-	"$(KUSTOMIZE)" build config/crd | kubectl apply -f -
+	"$(KUSTOMIZE)" build config/crd | "$(KUBECTL)" apply -f -
 
 .PHONY: uninstall
 uninstall: manifests kustomize ## Uninstall CRDs from the K8s cluster specified in ~/.kube/config.
-	"$(KUSTOMIZE)" build config/crd | kubectl delete --ignore-not-found=$(ignore-not-found) -f -
+	"$(KUSTOMIZE)" build config/crd | "$(KUBECTL)" delete --ignore-not-found=$(ignore-not-found) -f -
 
 .PHONY: deploy
 deploy: manifests kustomize ## Deploy controller to the K8s cluster specified in ~/.kube/config.
 	cd config/manager && "$(KUSTOMIZE)" edit set image controller="$(IMG)"
-	"$(KUSTOMIZE)" build config/default | kubectl apply -f -
+	"$(KUSTOMIZE)" build config/default | "$(KUBECTL)" apply -f -
 
 .PHONY: undeploy
 undeploy: kustomize ## Undeploy controller from the K8s cluster specified in ~/.kube/config.
 	@# Delete Workbenches CRs first so the running operator can process finalizers
-	kubectl delete workbenches --all --timeout=60s
-	"$(KUSTOMIZE)" build config/default | kubectl delete --ignore-not-found=$(ignore-not-found) -f -
+	"$(KUBECTL)" delete workbenches --all --timeout=60s
+	"$(KUSTOMIZE)" build config/default | "$(KUBECTL)" delete --ignore-not-found=$(ignore-not-found) -f -
 
 ##@ Dependencies
 
