@@ -26,6 +26,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/go-logr/logr"
 	"k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -35,6 +36,7 @@ import (
 	"sigs.k8s.io/kustomize/api/types"
 	"sigs.k8s.io/kustomize/kyaml/filesys"
 	"sigs.k8s.io/kustomize/kyaml/yaml"
+	sigyaml "sigs.k8s.io/yaml"
 
 	"github.com/opendatahub-io/workbenches-operator/internal/metadata"
 	"github.com/opendatahub-io/workbenches-operator/internal/platform"
@@ -96,6 +98,10 @@ func (r *WorkbenchesReconciler) renderAndApply(ctx context.Context, params map[s
 			continue
 		}
 
+		if err := patchKustomizeNamespace(renderDir, namespace, l); err != nil {
+			return fmt.Errorf("failed to patch kustomize namespace for %s: %w", group, err)
+		}
+
 		objects, err := renderKustomize(renderDir, params)
 		if err != nil {
 			return fmt.Errorf("failed to render manifests for %s: %w", group, err)
@@ -103,7 +109,7 @@ func (r *WorkbenchesReconciler) renderAndApply(ctx context.Context, params map[s
 
 		l.Info("rendered manifests", "group", group, "count", len(objects))
 
-		if err := r.applyObjects(ctx, objects, namespace); err != nil {
+		if err := r.applyObjects(ctx, objects); err != nil {
 			return fmt.Errorf("failed to apply manifests for %s: %w", group, err)
 		}
 	}
@@ -245,15 +251,12 @@ func writeParamsEnv(fSys filesys.FileSystem, kustomizeDir string, params map[str
 }
 
 // applyObjects applies a set of unstructured objects to the cluster using Server-Side Apply.
-func (r *WorkbenchesReconciler) applyObjects(ctx context.Context, objects []*unstructured.Unstructured, namespace string) error {
+// Namespace references are already set correctly by kustomize (via patchKustomizeNamespace).
+func (r *WorkbenchesReconciler) applyObjects(ctx context.Context, objects []*unstructured.Unstructured) error {
 	l := log.FromContext(ctx)
 
 	for _, obj := range objects {
 		setComponentLabels(obj)
-
-		if isNamespaced(obj) {
-			obj.SetNamespace(namespace)
-		}
 
 		obj.SetManagedFields(nil)
 
@@ -305,6 +308,66 @@ var clusterScopedKinds = map[string]bool{
 
 func isNamespaced(obj *unstructured.Unstructured) bool {
 	return !clusterScopedKinds[obj.GetKind()]
+}
+
+// patchKustomizeNamespace sets the namespace field in the kustomization file
+// at the given directory. If the file already has a namespace field it is
+// replaced; otherwise one is added. This lets kustomize's built-in namespace
+// transformer handle ALL namespace references — including internal refs in
+// ClusterRoleBinding subjects and webhook service configs — so the operator
+// does not need to post-process them.
+//
+// Uses structured YAML parsing to avoid injection risks and to preserve
+// nested "namespace:" fields (e.g. inside replacements selectors).
+func patchKustomizeNamespace(dir string, namespace string, logger logr.Logger) error {
+	kustomizationPath := findKustomizationFile(dir)
+	if kustomizationPath == "" {
+		return fmt.Errorf("no kustomization file found in %s — namespace %q would not be applied", dir, namespace)
+	}
+
+	data, err := os.ReadFile(kustomizationPath) //nolint:gosec // reading from operator-owned temp directory
+	if err != nil {
+		return fmt.Errorf("failed to read %s: %w", kustomizationPath, err)
+	}
+
+	var kustomization map[string]any
+	if unmarshalErr := sigyaml.Unmarshal(data, &kustomization); unmarshalErr != nil {
+		return fmt.Errorf("failed to parse %s: %w", kustomizationPath, unmarshalErr)
+	}
+
+	oldNS, _ := kustomization["namespace"].(string)
+	if oldNS == namespace {
+		logger.Info("kustomization namespace already set, skipping patch",
+			"file", kustomizationPath,
+			"namespace", namespace)
+
+		return nil
+	}
+
+	kustomization["namespace"] = namespace
+
+	logger.Info("patching kustomization namespace",
+		"file", kustomizationPath,
+		"oldNamespace", oldNS,
+		"newNamespace", namespace)
+
+	out, marshalErr := sigyaml.Marshal(kustomization)
+	if marshalErr != nil {
+		return fmt.Errorf("failed to serialize %s: %w", kustomizationPath, marshalErr)
+	}
+
+	return os.WriteFile(kustomizationPath, out, 0o600)
+}
+
+func findKustomizationFile(dir string) string {
+	for _, name := range []string{"kustomization.yaml", "kustomization.yml", "Kustomization"} {
+		p := filepath.Join(dir, name)
+		if _, err := os.Stat(p); err == nil {
+			return p
+		}
+	}
+
+	return ""
 }
 
 // cleanupGVKs lists the GroupVersionKinds of namespaced resources to clean up.

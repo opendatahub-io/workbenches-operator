@@ -25,6 +25,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/go-logr/logr"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -37,6 +38,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/kustomize/kyaml/filesys"
+	sigyaml "sigs.k8s.io/yaml"
 
 	componentsv1alpha1 "github.com/opendatahub-io/workbenches-operator/api/v1alpha1"
 	"github.com/opendatahub-io/workbenches-operator/internal/metadata"
@@ -928,4 +930,161 @@ func TestReconcileDeleteReturnsErrorWhenCleanupFails(t *testing.T) {
 	if !controllerutil.ContainsFinalizer(wb, workbenchesFinalizer) {
 		t.Error("finalizer should not be removed when cleanup fails")
 	}
+}
+
+func TestPatchKustomizeNamespace(t *testing.T) {
+	t.Run("replaces existing namespace", func(t *testing.T) {
+		dir := t.TempDir()
+		content := "apiVersion: kustomize.config.k8s.io/v1beta1\nkind: Kustomization\nnamespace: opendatahub\nresources:\n- deploy.yaml\n"
+
+		if err := os.WriteFile(filepath.Join(dir, "kustomization.yaml"), []byte(content), 0o600); err != nil {
+			t.Fatal(err)
+		}
+
+		if err := patchKustomizeNamespace(dir, "my-custom-ns", logr.Discard()); err != nil {
+			t.Fatalf("patchKustomizeNamespace() error = %v", err)
+		}
+
+		data, err := os.ReadFile(filepath.Join(dir, "kustomization.yaml")) //nolint:gosec // test reads from controlled temp dir
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		got := string(data)
+		if !strings.Contains(got, "namespace: my-custom-ns") {
+			t.Errorf("expected 'namespace: my-custom-ns', got:\n%s", got)
+		}
+
+		if strings.Contains(got, "opendatahub") {
+			t.Error("old namespace 'opendatahub' should have been replaced")
+		}
+
+		if !strings.Contains(got, "resources:") {
+			t.Error("non-namespace content should be preserved")
+		}
+	})
+
+	t.Run("adds namespace when missing", func(t *testing.T) {
+		dir := t.TempDir()
+		content := "apiVersion: kustomize.config.k8s.io/v1beta1\nkind: Kustomization\nresources:\n- deploy.yaml\n"
+
+		if err := os.WriteFile(filepath.Join(dir, "kustomization.yaml"), []byte(content), 0o600); err != nil {
+			t.Fatal(err)
+		}
+
+		if err := patchKustomizeNamespace(dir, "added-ns", logr.Discard()); err != nil {
+			t.Fatalf("patchKustomizeNamespace() error = %v", err)
+		}
+
+		data, err := os.ReadFile(filepath.Join(dir, "kustomization.yaml")) //nolint:gosec // test reads from controlled temp dir
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		if !strings.Contains(string(data), "namespace: added-ns") {
+			t.Errorf("expected 'namespace: added-ns' to be appended, got:\n%s", string(data))
+		}
+	})
+
+	t.Run("returns error when directory has no kustomization file", func(t *testing.T) {
+		dir := t.TempDir()
+
+		err := patchKustomizeNamespace(dir, "whatever", logr.Discard())
+		if err == nil {
+			t.Fatal("patchKustomizeNamespace() should return error when no kustomization file exists")
+		}
+
+		if !strings.Contains(err.Error(), "no kustomization file found") {
+			t.Fatalf("unexpected error message: %v", err)
+		}
+	})
+
+	t.Run("works with kustomization.yml variant", func(t *testing.T) {
+		dir := t.TempDir()
+		content := "namespace: old-ns\nresources:\n- svc.yaml\n"
+
+		if err := os.WriteFile(filepath.Join(dir, "kustomization.yml"), []byte(content), 0o600); err != nil {
+			t.Fatal(err)
+		}
+
+		if err := patchKustomizeNamespace(dir, "new-ns", logr.Discard()); err != nil {
+			t.Fatalf("patchKustomizeNamespace() error = %v", err)
+		}
+
+		data, err := os.ReadFile(filepath.Join(dir, "kustomization.yml")) //nolint:gosec // test reads from controlled temp dir
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		if !strings.Contains(string(data), "namespace: new-ns") {
+			t.Errorf("expected 'namespace: new-ns', got:\n%s", string(data))
+		}
+	})
+
+	t.Run("does not modify nested namespace fields", func(t *testing.T) {
+		dir := t.TempDir()
+		content := "apiVersion: kustomize.config.k8s.io/v1beta1\nkind: Kustomization\n" +
+			"resources:\n- ../default\nreplacements:\n- source:\n    kind: ConfigMap\n" +
+			"  targets:\n  - select:\n      namespace: system\n      kind: Deployment\n"
+
+		if err := os.WriteFile(filepath.Join(dir, "kustomization.yaml"), []byte(content), 0o600); err != nil {
+			t.Fatal(err)
+		}
+
+		if err := patchKustomizeNamespace(dir, "my-ns", logr.Discard()); err != nil {
+			t.Fatalf("patchKustomizeNamespace() error = %v", err)
+		}
+
+		data, err := os.ReadFile(filepath.Join(dir, "kustomization.yaml")) //nolint:gosec // test reads from controlled temp dir
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		got := string(data)
+		if !strings.Contains(got, "namespace: my-ns") {
+			t.Error("top-level namespace should have been added")
+		}
+
+		if !strings.Contains(got, "namespace: system") {
+			t.Error("nested 'namespace: system' in replacements selector should be preserved")
+		}
+	})
+
+	t.Run("namespace with newline does not inject extra YAML keys", func(t *testing.T) {
+		dir := t.TempDir()
+		content := "apiVersion: kustomize.config.k8s.io/v1beta1\nkind: Kustomization\n" +
+			"resources:\n- deploy.yaml\n"
+
+		if err := os.WriteFile(filepath.Join(dir, "kustomization.yaml"), []byte(content), 0o600); err != nil {
+			t.Fatal(err)
+		}
+
+		malicious := "test-ns\nmalicious-key: malicious-value"
+		if err := patchKustomizeNamespace(dir, malicious, logr.Discard()); err != nil {
+			t.Fatalf("patchKustomizeNamespace() error = %v", err)
+		}
+
+		data, err := os.ReadFile(filepath.Join(dir, "kustomization.yaml")) //nolint:gosec // test reads from controlled temp dir
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		var parsed map[string]any
+		if err := sigyaml.Unmarshal(data, &parsed); err != nil {
+			t.Fatalf("output should be valid YAML: %v", err)
+		}
+
+		if _, exists := parsed["malicious-key"]; exists {
+			t.Error("YAML injection should not produce extra top-level keys")
+		}
+
+		ns, ok := parsed["namespace"].(string)
+		if !ok {
+			t.Fatal("namespace should be a string")
+		}
+
+		if !strings.Contains(ns, "malicious-key") {
+			t.Error("the injected payload should be safely contained within the namespace value")
+		}
+	})
 }
