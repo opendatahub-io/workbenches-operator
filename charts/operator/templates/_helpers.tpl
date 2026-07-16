@@ -96,6 +96,9 @@ Operator container arguments.
 {{- else }}
 - --enable-webhooks=false
 {{- end }}
+{{- if .Values.devLogging }}
+- --zap-devel=true
+{{- end }}
 {{- end }}
 
 {{/*

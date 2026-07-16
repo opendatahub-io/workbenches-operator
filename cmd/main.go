@@ -76,7 +76,7 @@ func main() {
 		"Base path for component manifests.")
 
 	opts := zap.Options{
-		Development: true,
+		Development: false,
 	}
 	opts.BindFlags(flag.CommandLine)
 	flag.Parse()

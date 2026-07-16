@@ -48,6 +48,10 @@ serviceAccount:
   # Becomes {{ namePrefix }}controller-manager when namePrefix is set.
   name: controller-manager
 
+# Enable development logging (debug level, console format, stacktraces on warnings).
+# For production use, leave false. Toggle to true for local development/debugging.
+devLogging: false
+
 # Disabled by default: bootstrap runs a single replica; enable when scaling out.
 leaderElection:
   enabled: false
