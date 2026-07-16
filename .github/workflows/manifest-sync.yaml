@@ -37,7 +37,7 @@ jobs:
       - name: Fetch upstream manifests
         run: bash get_all_manifests.sh
 
-      - uses: actions/setup-go@v6
+      - uses: actions/setup-go@v7
         with:
           check-latest: true
           go-version-file: go.mod
