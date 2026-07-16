@@ -409,7 +409,7 @@ func (r *WorkbenchesReconciler) reconcileManaged(ctx context.Context, wb *compon
 		return r.setErrorStatus(ctx, wb, "PlatformVersionReadFailed", err)
 	}
 
-	if err := r.configureDependencies(ctx, wb); err != nil {
+	if err = r.configureDependencies(ctx, wb); err != nil {
 		return r.setErrorStatus(ctx, wb, "ConfigureDependenciesFailed", err)
 	}
 
@@ -418,11 +418,11 @@ func (r *WorkbenchesReconciler) reconcileManaged(ctx context.Context, wb *compon
 
 	nsName := r.resolveWorkbenchNamespace(wb)
 
-	if err := r.renderAndApply(ctx, params, nsName, wb.Spec.Platform); err != nil {
+	if err = r.renderAndApply(ctx, params, nsName, wb.Spec.Platform); err != nil {
 		return r.setErrorStatus(ctx, wb, "ManifestApplyFailed", err)
 	}
 
-	if err := r.populateReleases(wb); err != nil {
+	if err = r.populateReleases(wb); err != nil {
 		// Release metadata is informational; a missing or malformed
 		// component_metadata.yaml must not block a successful deploy.
 		l.Error(err, "failed to populate release metadata; continuing with empty releases")
