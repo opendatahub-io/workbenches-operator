@@ -27,11 +27,13 @@ import (
 
 	configv1 "github.com/openshift/api/config/v1"
 	tlspkg "github.com/openshift/controller-runtime-common/pkg/tls"
+	admissionregistrationv1 "k8s.io/api/admissionregistration/v1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	"k8s.io/apimachinery/pkg/util/validation"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
+	"k8s.io/client-go/rest"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/cache"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -46,6 +48,7 @@ import (
 	"github.com/opendatahub-io/workbenches-operator/internal/platform"
 	"github.com/opendatahub-io/workbenches-operator/internal/tlsconfig"
 	"github.com/opendatahub-io/workbenches-operator/internal/webhook"
+	webhooktls "github.com/opendatahub-io/workbenches-operator/internal/webhook/tls"
 )
 
 var (
@@ -55,6 +58,7 @@ var (
 
 func init() {
 	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
+	utilruntime.Must(admissionregistrationv1.AddToScheme(scheme))
 	utilruntime.Must(componentsv1alpha1.AddToScheme(scheme))
 	utilruntime.Must(configv1.Install(scheme))
 }
@@ -104,14 +108,14 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Bootstrap TLS configuration from the cluster's APIServer TLS profile (OpenShift only).
 	restCfg := ctrl.GetConfigOrDie()
 	bootstrapClient, err := client.New(restCfg, client.Options{Scheme: scheme})
 	if err != nil {
-		setupLog.Error(err, "unable to create bootstrap client for TLS profile")
+		setupLog.Error(err, "unable to create bootstrap client for TLS setup")
 		os.Exit(1)
 	}
 
+	// Bootstrap cipher/min-version config from the cluster's APIServer TLS profile (OpenShift only).
 	bootstrapCtx, bootstrapCancel := context.WithTimeout(context.Background(), 10*time.Second)
 	tlsResult, err := tlsconfig.Bootstrap(bootstrapCtx, bootstrapClient, enableHTTP2, tlsconfig.DefaultFetcher())
 	bootstrapCancel()
@@ -119,11 +123,15 @@ func main() {
 		setupLog.Error(err, "unable to read APIServer TLS profile, refusing to start with unknown TLS posture")
 		os.Exit(1)
 	}
+	logTLSBootstrapResult(tlsResult)
 
-	if !tlsResult.HasOpenShiftConfigAPI {
-		setupLog.Info("TLS profile not available, using hardened defaults (non-OpenShift cluster)")
-	} else if len(tlsResult.UnsupportedCiphers) > 0 {
-		setupLog.Info("some ciphers from TLS profile are not supported by Go", "unsupported", tlsResult.UnsupportedCiphers)
+	// Configure webhook serving certs when requested. If no TLS provider is
+	// available, disable the webhook server and skip the periodic ensurer so we
+	// never re-annotate a MutatingWebhookConfiguration without a listening server.
+	enableWebhooks, err = configureWebhookServingCerts(restCfg, bootstrapClient, enableWebhooks)
+	if err != nil {
+		setupLog.Error(err, "unable to configure webhook TLS")
+		os.Exit(1)
 	}
 
 	metricsServerOptions := metricsserver.Options{
@@ -136,32 +144,21 @@ func main() {
 		metricsServerOptions.FilterProvider = filters.WithAuthenticationAndAuthorization
 	}
 
-	webhookServer := ctrlwebhook.NewServer(ctrlwebhook.Options{
-		Port:    9443,
-		TLSOpts: tlsResult.TLSOpts,
-	})
-
-	providedApplicationsNamespace := strings.TrimSpace(os.Getenv("APPLICATIONS_NAMESPACE"))
-	applicationsNamespace := providedApplicationsNamespace
-	if applicationsNamespace == "" || len(validation.IsDNS1123Label(applicationsNamespace)) > 0 {
-		applicationsNamespace = platform.DefaultNotebooksNamespaceODH
-		if providedApplicationsNamespace == "" {
-			setupLog.Info("APPLICATIONS_NAMESPACE not set; using default",
-				"default", applicationsNamespace)
-		} else {
-			setupLog.Info("APPLICATIONS_NAMESPACE invalid; using default",
-				"provided", providedApplicationsNamespace,
-				"default", applicationsNamespace)
-		}
-	}
+	applicationsNamespace := resolveApplicationsNamespace()
 
 	mgrOptions := ctrl.Options{
 		Scheme:                 scheme,
 		Metrics:                metricsServerOptions,
-		WebhookServer:          webhookServer,
 		HealthProbeBindAddress: probeAddr,
 		LeaderElection:         enableLeaderElection,
 		LeaderElectionID:       "workbenches-operator.platform.opendatahub.io",
+	}
+
+	if enableWebhooks {
+		mgrOptions.WebhookServer = ctrlwebhook.NewServer(ctrlwebhook.Options{
+			Port:    9443,
+			TLSOpts: tlsResult.TLSOpts,
+		})
 	}
 	// Partially addresses https://github.com/opendatahub-io/workbenches-operator/issues/43:
 	// scope ConfigMap informer cache to APPLICATIONS_NAMESPACE. Deployment watches remain
@@ -200,6 +197,13 @@ func main() {
 		}
 	}
 
+	if enableWebhooks {
+		if err := addWebhookTLSEnsurer(mgr, restCfg, bootstrapClient); err != nil {
+			setupLog.Error(err, "unable to set up webhook TLS ensurer")
+			os.Exit(1)
+		}
+	}
+
 	if err := mgr.AddHealthzCheck("healthz", healthz.Ping); err != nil {
 		setupLog.Error(err, "unable to set up health check")
 		os.Exit(1)
@@ -212,28 +216,10 @@ func main() {
 
 	// Register SecurityProfileWatcher on OpenShift: cancel context on TLS profile change so pod restarts.
 	ctx, cancel := context.WithCancel(ctrl.SetupSignalHandler())
-
-	if tlsResult.HasOpenShiftConfigAPI {
-		watcher := &tlspkg.SecurityProfileWatcher{
-			Client:                mgr.GetClient(),
-			InitialTLSProfileSpec: tlsResult.Profile,
-			OnProfileChange: func(_ context.Context, _, _ configv1.TLSProfileSpec) {
-				setupLog.Info("TLS profile changed, initiating graceful shutdown to reload")
-				cancel()
-			},
-		}
-		if tlsResult.TLSAdherenceFetched {
-			watcher.InitialTLSAdherencePolicy = tlsResult.TLSAdherence
-			watcher.OnAdherencePolicyChange = func(_ context.Context, _, _ configv1.TLSAdherencePolicy) {
-				setupLog.Info("TLS adherence policy changed, initiating shutdown to reload")
-				cancel()
-			}
-		}
-		if err := watcher.SetupWithManager(mgr); err != nil {
-			setupLog.Error(err, "unable to register TLS security profile watcher")
-			cancel()
-			os.Exit(1)
-		}
+	if err := registerTLSProfileWatcher(mgr, tlsResult, cancel); err != nil {
+		setupLog.Error(err, "unable to register TLS security profile watcher")
+		cancel()
+		os.Exit(1)
 	}
 
 	setupLog.Info("starting manager")
@@ -244,4 +230,88 @@ func main() {
 		os.Exit(1)
 	}
 	cancel()
+}
+
+func logTLSBootstrapResult(tlsResult *tlsconfig.BootstrapResult) {
+	if !tlsResult.HasOpenShiftConfigAPI {
+		setupLog.Info("TLS profile not available, using hardened defaults (non-OpenShift cluster)")
+		return
+	}
+	if len(tlsResult.UnsupportedCiphers) > 0 {
+		setupLog.Info("some ciphers from TLS profile are not supported by Go", "unsupported", tlsResult.UnsupportedCiphers)
+	}
+}
+
+// configureWebhookServingCerts detects the TLS provider and ensures serving certs.
+// When enableWebhooks is false, it is a no-op. When the provider is None, it returns
+// false so the webhook server (and TLS ensurer) are not started.
+func configureWebhookServingCerts(cfg *rest.Config, cli client.Client, enableWebhooks bool) (bool, error) {
+	if !enableWebhooks {
+		return false, nil
+	}
+
+	startupCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	enabled, err := webhookTLSConfigure(startupCtx, cfg, cli)
+	if err != nil {
+		return false, err
+	}
+	if !enabled {
+		setupLog.Info("webhook TLS provider unavailable; disabling webhooks")
+		return false, nil
+	}
+	return true, nil
+}
+
+// webhookTLSConfigure is the Configure entrypoint; overridden in unit tests.
+var webhookTLSConfigure = webhooktls.Configure
+
+func resolveApplicationsNamespace() string {
+	provided := strings.TrimSpace(os.Getenv("APPLICATIONS_NAMESPACE"))
+	if provided != "" && len(validation.IsDNS1123Label(provided)) == 0 {
+		return provided
+	}
+
+	ns := platform.DefaultNotebooksNamespaceODH
+	if provided == "" {
+		setupLog.Info("APPLICATIONS_NAMESPACE not set; using default",
+			"default", ns)
+	} else {
+		setupLog.Info("APPLICATIONS_NAMESPACE invalid; using default",
+			"provided", provided,
+			"default", ns)
+	}
+	return ns
+}
+
+func addWebhookTLSEnsurer(mgr ctrl.Manager, cfg *rest.Config, cli client.Client) error {
+	ensurer, err := webhooktls.NewEnsurer(cfg, cli)
+	if err != nil {
+		return err
+	}
+	return mgr.Add(ensurer)
+}
+
+func registerTLSProfileWatcher(mgr ctrl.Manager, tlsResult *tlsconfig.BootstrapResult, cancel context.CancelFunc) error {
+	if !tlsResult.HasOpenShiftConfigAPI {
+		return nil
+	}
+
+	watcher := &tlspkg.SecurityProfileWatcher{
+		Client:                mgr.GetClient(),
+		InitialTLSProfileSpec: tlsResult.Profile,
+		OnProfileChange: func(_ context.Context, _, _ configv1.TLSProfileSpec) {
+			setupLog.Info("TLS profile changed, initiating graceful shutdown to reload")
+			cancel()
+		},
+	}
+	if tlsResult.TLSAdherenceFetched {
+		watcher.InitialTLSAdherencePolicy = tlsResult.TLSAdherence
+		watcher.OnAdherencePolicyChange = func(_ context.Context, _, _ configv1.TLSAdherencePolicy) {
+			setupLog.Info("TLS adherence policy changed, initiating shutdown to reload")
+			cancel()
+		}
+	}
+	return watcher.SetupWithManager(mgr)
 }

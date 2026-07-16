@@ -82,6 +82,14 @@ rules:
     verbs:
       - create
   - apiGroups:
+      - cert-manager.io
+    resources:
+      - clusterissuers
+    verbs:
+      - create
+      - get
+      - patch
+  - apiGroups:
       - components.platform.opendatahub.io
     resources:
       - workbenches

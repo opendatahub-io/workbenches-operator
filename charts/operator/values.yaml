@@ -82,13 +82,16 @@ webhooks:
   port: 9443
   # TLS provider for webhook serving certificates.
   # Supported values:
-  #   "openshift"    — uses OpenShift service-CA (serving-cert-secret-name +
-  #                    inject-cabundle annotations). Default.
-  #   "certmanager"  — uses cert-manager Certificate + Issuer resources.
-  #                    Requires cert-manager to be installed on the cluster.
-  #   ""             — disables TLS volume mount entirely (use when the platform
-  #                    provisions certificates out-of-band).
-  tlsProvider: openshift
+  #   ""             — operator auto-configures at runtime (platform path).
+  #                    Detects OpenShift service-CA, cert-manager, or disables
+  #                    webhooks when neither is available. No chart-side TLS
+  #                    annotations or Certificate/Issuer resources are rendered.
+  #   "openshift"    — explicit override for standalone Helm: OpenShift
+  #                    service-CA annotations on Service + MutatingWebhookConfiguration.
+  #   "certmanager"  — explicit override for standalone Helm: cert-manager
+  #                    Certificate + ClusterIssuer resources. Requires
+  #                    cert-manager on the cluster.
+  tlsProvider: ""
   certSecret: ""   # auto-derived from namePrefix when empty
   # cert-manager settings (only used when tlsProvider is "certmanager").
   certManager:

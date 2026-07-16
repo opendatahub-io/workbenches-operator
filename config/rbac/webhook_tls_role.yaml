@@ -1,0 +1,19 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  labels:
+    app.kubernetes.io/name: workbenches-operator
+    app.kubernetes.io/managed-by: kustomize
+  name: webhook-tls-role
+  namespace: system
+rules:
+  # Namespaced cert-manager Certificate used for webhook serving certs.
+  # ClusterIssuer permissions remain on the ClusterRole (manager-role).
+  - apiGroups:
+      - cert-manager.io
+    resources:
+      - certificates
+    verbs:
+      - create
+      - get
+      - patch

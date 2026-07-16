@@ -5,4 +5,6 @@ resources:
 - rbac_escalate_role_binding.yaml
 - leader_election_role.yaml
 - leader_election_role_binding.yaml
+- webhook_tls_role.yaml
+- webhook_tls_role_binding.yaml
 - service_account.yaml

@@ -56,6 +56,13 @@ Leader election Role name (namespace-scoped).
 {{- end }}
 
 {{/*
+Webhook TLS Role name (namespace-scoped cert-manager Certificate permissions).
+*/}}
+{{- define "workbenches-operator.webhookTLSRoleName" -}}
+{{- include "workbenches-operator.prefixed" (list . "webhook-tls-role") -}}
+{{- end }}
+
+{{/*
 Common labels applied to operator resources.
 */}}
 {{- define "workbenches-operator.labels" -}}
