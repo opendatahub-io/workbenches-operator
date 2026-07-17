@@ -2,7 +2,7 @@
 # Requires cert-manager to be installed on the cluster.
 # For OpenShift clusters, use config/default/ instead.
 resources:
-- ../base
+- ../operator
 - selfsigned-issuer.yaml
 - certificate.yaml
 

@@ -1,0 +1,161 @@
+name: E2E Tests
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "cmd/**"
+      - "api/**"
+      - "internal/**"
+      - "Dockerfile"
+      - "Makefile"
+      - "go.mod"
+      - "go.sum"
+      - "config/**"
+      - "charts/**"
+      - "tests/e2e/**"
+      - ".github/workflows/e2e.yml"
+  workflow_dispatch:
+
+jobs:
+  e2e:
+    name: E2E Tests (${{ matrix.deploy-method }})
+    permissions:
+      contents: read
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        deploy-method: [kustomize, helm]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Create Kind cluster
+        uses: helm/kind-action@v1
+        with:
+          cluster_name: workbenches-e2e
+          node_image: kindest/node:v1.32.0
+
+      - name: Install cert-manager
+        run: |
+          kubectl apply -f https://github.com/cert-manager/cert-manager/releases/download/v1.21.0/cert-manager.yaml
+          kubectl wait --for=condition=Available --timeout=120s \
+            deployment/cert-manager-webhook -n cert-manager
+
+      # Adapted from https://github.com/jiridanek/rhoai-in-kind/tree/main/components/05-ca-operator
+      - name: Install OpenShift service-ca-operator (Kind lacks serving-cert-signer)
+        run: |
+          kubectl label node --all node-role.kubernetes.io/master="" --overwrite
+          kubectl create namespace openshift-config-managed
+          kubectl apply -f https://raw.githubusercontent.com/openshift/api/72066cc9718bcab23b025ead4925db0b823adaf0/operator/v1/zz_generated.crd-manifests/0000_50_service-ca_02_servicecas.crd.yaml
+          kubectl apply -f https://raw.githubusercontent.com/openshift/api/72066cc9718bcab23b025ead4925db0b823adaf0/config/v1/zz_generated.crd-manifests/0000_00_cluster-version-operator_01_clusteroperators.crd.yaml
+          kubectl apply -f https://raw.githubusercontent.com/openshift/api/72066cc9718bcab23b025ead4925db0b823adaf0/payload-manifests/crds/0000_10_config-operator_01_infrastructures-Default.crd.yaml
+          kubectl apply -f https://raw.githubusercontent.com/openshift/api/72066cc9718bcab23b025ead4925db0b823adaf0/payload-command/empty-resources/0000_05_config-operator_02_infrastructure.cr.yaml
+          kubectl apply -f tests/e2e/kind/service-ca-operator.yaml
+          kubectl wait --for=condition=Available --timeout=120s \
+            deployment/service-ca-operator -n openshift-service-ca-operator
+          echo "Waiting for service-ca child deployment to appear..."
+          timeout 120s bash -c \
+            'until kubectl get deployment/service-ca -n openshift-service-ca 2>/dev/null; do sleep 2; done'
+          kubectl scale deployment/service-ca-operator -n openshift-service-ca-operator --replicas=0
+          kubectl wait --for=jsonpath='{.spec.replicas}'=0 --timeout=60s \
+            deployment/service-ca-operator -n openshift-service-ca-operator
+          kubectl patch deployment/service-ca -n openshift-service-ca \
+            -p '{"spec":{"template":{"spec":{"securityContext":{"runAsUser":1001}}}}}'
+          kubectl wait --for=condition=Available --timeout=120s \
+            deployment/service-ca -n openshift-service-ca
+
+      - name: Fetch upstream manifests
+        run: make manifests-fetch
+
+      - name: Build operator image
+        run: |
+          make image-build IMG=workbenches-operator:e2e CONTAINER_ENGINE=docker
+          kind load docker-image workbenches-operator:e2e --name workbenches-e2e
+
+      - name: Install Notebook CRD
+        run: kubectl apply -f opt/manifests/workbenches/kf-notebook-controller/crd/bases/kubeflow.org_notebooks.yaml
+
+      - name: Install OpenShift ImageStream CRD (Kind lacks OpenShift APIs)
+        run: kubectl apply -f opt/manifests/workbenches/odh-notebook-controller/crd/external/image.openshift.io_imagestream.yaml
+
+      - name: Install HardwareProfile CRD
+        run: kubectl apply -f tests/e2e/kind/infrastructure.opendatahub.io_hardwareprofiles.yaml
+
+      # --- kustomize deploy path ---
+
+      - name: Install CRDs (kustomize)
+        if: matrix.deploy-method == 'kustomize'
+        run: make install
+
+      - name: Deploy operator with webhooks (kustomize)
+        if: matrix.deploy-method == 'kustomize'
+        run: |
+          make kustomize
+          (cd config/manager && ../../bin/kustomize edit set image controller=workbenches-operator:e2e)
+          bin/kustomize build config/certmanager | kubectl apply -f -
+          kubectl patch -n workbenches-operator-system \
+            deployment/workbenches-operator \
+            -p '{"spec":{"template":{"spec":{"containers":[{"name":"manager","imagePullPolicy":"Never"}]}}}}'
+
+      # --- helm deploy path ---
+
+      - name: Create applications namespace (helm)
+        if: matrix.deploy-method == 'helm'
+        # The Helm chart creates odh-workbenches-config ConfigMap in applicationsNamespace.
+        # In production, opendatahub-operator creates this namespace; in CI we must do it manually.
+        run: kubectl create namespace opendatahub
+
+      - name: Deploy operator with webhooks (helm)
+        if: matrix.deploy-method == 'helm'
+        run: |
+          make helm-deploy \
+            IMG=workbenches-operator:e2e \
+            HELM_DEPLOY_SETS="--set webhooks.tlsProvider=certmanager \
+              --set params.workbenchesOperatorImage=workbenches-operator:e2e \
+              --set image.pullPolicy=Never"
+
+      # --- shared post-deploy steps ---
+
+      - name: Wait for operator ready
+        run: |
+          kubectl wait --for=condition=Available --timeout=120s \
+            deployment/workbenches-operator \
+            -n workbenches-operator-system
+
+      - name: Run E2E tests
+        run: make test-e2e
+        env:
+          OPERATOR_NAMESPACE: workbenches-operator-system
+
+      - name: Collect logs on failure
+        if: failure()
+        run: |
+          mkdir -p /tmp/e2e-logs
+          echo "=== Operator logs ==="
+          kubectl logs -n workbenches-operator-system \
+            deployment/workbenches-operator \
+            --tail=500 2>&1 | tee /tmp/e2e-logs/operator.log || true
+          echo "=== Workbenches CR ==="
+          kubectl get workbenches -o yaml 2>&1 | tee /tmp/e2e-logs/workbenches.yaml || true
+          echo "=== Events ==="
+          kubectl get events -A --sort-by='.lastTimestamp' 2>&1 \
+            | tail -50 | tee /tmp/e2e-logs/events.log || true
+          echo "=== Pods ==="
+          kubectl get pods -A 2>&1 | tee /tmp/e2e-logs/pods.log || true
+
+      - name: Upload logs artifact
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-failure-logs-${{ matrix.deploy-method }}
+          path: /tmp/e2e-logs/
+          retention-days: 7
+          if-no-files-found: ignore

@@ -10,6 +10,8 @@ metadata:
 apiVersion: apps/v1
 kind: Deployment
 metadata:
+  # Base name; namePrefix makes this workbenches-operator-controller-manager,
+  # then config/operator renames it to workbenches-operator (matches Helm).
   name: controller-manager
   namespace: system
   labels:

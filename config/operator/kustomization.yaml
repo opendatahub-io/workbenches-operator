@@ -1,0 +1,10 @@
+# Shared operator manifests with Deployment named workbenches-operator.
+# Install overlays (default, certmanager) build on this root.
+resources:
+- ../base
+
+patches:
+- path: deployment_name.yaml
+  target:
+    kind: Deployment
+    name: workbenches-operator-controller-manager

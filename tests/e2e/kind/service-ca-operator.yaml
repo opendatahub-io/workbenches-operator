@@ -1,0 +1,139 @@
+# OpenShift service-ca-operator manifests for Kind clusters.
+#
+# The service-ca-operator handles the service.beta.openshift.io/serving-cert-secret-name
+# annotation on Services (auto-creates TLS secrets) and the
+# service.beta.openshift.io/inject-cabundle annotation on webhook configurations
+# (auto-injects the CA bundle). These are OpenShift-native features that don't
+# exist on vanilla Kubernetes.
+#
+# Adapted from https://github.com/jiridanek/rhoai-in-kind/tree/main/components/05-ca-operator
+# Uses the upstream OKD image with a kubectl patch for the RunAsNonRoot issue
+# (see https://github.com/openshift/service-ca-operator/issues/237).
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: openshift-service-ca
+  annotations:
+    openshift.io/node-selector: ""
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  labels:
+    openshift.io/cluster-monitoring: "true"
+  name: openshift-service-ca-operator
+  annotations:
+    openshift.io/node-selector: ""
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  namespace: openshift-service-ca-operator
+  name: service-ca-operator
+  labels:
+    app: service-ca-operator
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: system:openshift:operator:service-ca-operator
+roleRef:
+  kind: ClusterRole
+  name: cluster-admin
+  apiGroup: rbac.authorization.k8s.io
+subjects:
+  - kind: ServiceAccount
+    namespace: openshift-service-ca-operator
+    name: service-ca-operator
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  namespace: openshift-service-ca-operator
+  name: service-ca-operator-config
+data:
+  operator-config.yaml: |
+    apiVersion: operator.openshift.io/v1alpha1
+    kind: GenericOperatorConfig
+---
+apiVersion: operator.openshift.io/v1
+kind: ServiceCA
+metadata:
+  name: cluster
+spec:
+  managementState: Managed
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  namespace: openshift-service-ca-operator
+  name: service-ca-operator
+  labels:
+    app: service-ca-operator
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: service-ca-operator
+  template:
+    metadata:
+      name: service-ca-operator
+      labels:
+        app: service-ca-operator
+    spec:
+      serviceAccountName: service-ca-operator
+      securityContext:
+        runAsNonRoot: true
+        runAsGroup: 1001
+        runAsUser: 1001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: service-ca-operator
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+          image: quay.io/openshift/origin-service-ca-operator@sha256:1441889d1231e30d702c97f0d713af274284eaf4c0b8dca2a618cd6b55559282
+          imagePullPolicy: IfNotPresent
+          command: ["service-ca-operator", "operator"]
+          args:
+            - "--config=/var/run/configmaps/config/operator-config.yaml"
+            - "-v=2"
+          resources:
+            requests:
+              memory: 80Mi
+              cpu: 10m
+            limits:
+              memory: 256Mi
+              cpu: 100m
+          env:
+            - name: CONTROLLER_IMAGE
+              value: quay.io/openshift/origin-service-ca-operator@sha256:1441889d1231e30d702c97f0d713af274284eaf4c0b8dca2a618cd6b55559282
+            - name: OPERATOR_IMAGE_VERSION
+              value: "0.0.1-snapshot"
+          terminationMessagePolicy: FallbackToLogsOnError
+          volumeMounts:
+            - mountPath: /var/run/configmaps/config
+              name: config
+            - mountPath: /var/run/secrets/serving-cert
+              name: serving-cert
+      volumes:
+        - name: serving-cert
+          secret:
+            secretName: serving-cert
+            optional: true
+        - name: config
+          configMap:
+            name: service-ca-operator-config
+      tolerations:
+        - key: "node.kubernetes.io/unreachable"
+          operator: "Exists"
+          effect: "NoExecute"
+          tolerationSeconds: 120
+        - key: "node.kubernetes.io/not-ready"
+          operator: "Exists"
+          effect: "NoExecute"
+          tolerationSeconds: 120

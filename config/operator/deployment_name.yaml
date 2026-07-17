@@ -1,0 +1,7 @@
+# Rename the manager Deployment after namePrefix is applied.
+# Kubebuilder defaults to workbenches-operator-controller-manager; we use the
+# shorter workbenches-operator name so kustomize matches the Helm chart
+# (Release.Name / ModuleHandler injectModuleEnv target).
+- op: replace
+  path: /metadata/name
+  value: workbenches-operator

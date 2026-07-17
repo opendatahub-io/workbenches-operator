@@ -1,7 +1,7 @@
 # OpenShift-specific overlay. Requires OpenShift's service-CA controller.
 # For vanilla Kubernetes clusters, use config/certmanager/ instead.
 resources:
-- ../base
+- ../operator
 
 patches:
 - path: webhook_openshift_patch.yaml
