@@ -31,6 +31,7 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/kustomize/api/krusty"
 	"sigs.k8s.io/kustomize/api/types"
@@ -38,6 +39,7 @@ import (
 	"sigs.k8s.io/kustomize/kyaml/yaml"
 	sigyaml "sigs.k8s.io/yaml"
 
+	componentsv1alpha1 "github.com/opendatahub-io/workbenches-operator/api/v1alpha1"
 	"github.com/opendatahub-io/workbenches-operator/internal/metadata"
 	"github.com/opendatahub-io/workbenches-operator/internal/platform"
 )
@@ -65,7 +67,16 @@ func manifestGroupsForPlatform(platformType string) []string {
 // renderAndApply renders the upstream kustomize manifests with parameter injection
 // and applies them to the cluster via Server-Side Apply with ForceOwnership.
 // It copies manifests to a temp directory so the baked-in /opt/manifests stays immutable.
-func (r *WorkbenchesReconciler) renderAndApply(ctx context.Context, params map[string]string, namespace string, platformType string) error {
+// After a successful apply it runs continuous GC (ODH-style): labeled managed resources
+// that are no longer present in the rendered desired set are deleted so upgrades drop
+// obsolete operands.
+func (r *WorkbenchesReconciler) renderAndApply(
+	ctx context.Context,
+	owner *componentsv1alpha1.Workbenches,
+	params map[string]string,
+	namespace string,
+	platformType string,
+) error {
 	l := log.FromContext(ctx)
 
 	workDir, err := os.MkdirTemp("", "workbenches-manifests-*")
@@ -88,6 +99,7 @@ func (r *WorkbenchesReconciler) renderAndApply(ctx context.Context, params map[s
 	}
 
 	groups := manifestGroupsForPlatform(platformType)
+	desired := make(map[objectRef]struct{})
 
 	for _, group := range groups {
 		renderDir := filepath.Join(workDir, group)
@@ -109,9 +121,17 @@ func (r *WorkbenchesReconciler) renderAndApply(ctx context.Context, params map[s
 
 		l.Info("rendered manifests", "group", group, "count", len(objects))
 
-		if err := r.applyObjects(ctx, objects); err != nil {
+		for _, obj := range objects {
+			desired[objectRefFrom(obj)] = struct{}{}
+		}
+
+		if err := r.applyObjects(ctx, owner, objects); err != nil {
 			return fmt.Errorf("failed to apply manifests for %s: %w", group, err)
 		}
+	}
+
+	if err := r.gcOrphanedResources(ctx, namespace, desired); err != nil {
+		return fmt.Errorf("failed to garbage-collect orphaned resources: %w", err)
 	}
 
 	return nil
@@ -252,11 +272,29 @@ func writeParamsEnv(fSys filesys.FileSystem, kustomizeDir string, params map[str
 
 // applyObjects applies a set of unstructured objects to the cluster using Server-Side Apply.
 // Namespace references are already set correctly by kustomize (via patchKustomizeNamespace).
-func (r *WorkbenchesReconciler) applyObjects(ctx context.Context, objects []*unstructured.Unstructured) error {
+// Owner references are set with SetControllerReference (matching opendatahub-operator) so
+// Owns() watches fire on drift and Kubernetes GC can cascade-delete owned children when the
+// Workbenches CR is deleted. Namespaces, CRDs, and ImageStreams are intentionally excluded.
+func (r *WorkbenchesReconciler) applyObjects(
+	ctx context.Context,
+	owner *componentsv1alpha1.Workbenches,
+	objects []*unstructured.Unstructured,
+) error {
 	l := log.FromContext(ctx)
 
 	for _, obj := range objects {
 		setComponentLabels(obj)
+
+		if shouldSetOwnerReference(obj) {
+			// Clear any template-defined ownerReferences before setting the
+			// controller reference — applyObjects is the single source of truth.
+			obj.SetOwnerReferences(nil)
+
+			if err := controllerutil.SetControllerReference(owner, obj, r.Scheme); err != nil {
+				return fmt.Errorf("failed to set owner reference on %s %s/%s: %w",
+					obj.GetKind(), obj.GetNamespace(), obj.GetName(), err)
+			}
+		}
 
 		obj.SetManagedFields(nil)
 
@@ -306,8 +344,23 @@ var clusterScopedKinds = map[string]bool{
 	"ValidatingWebhookConfiguration": true,
 }
 
+// skipOwnerRefKinds are never owned by the Workbenches CR.
+//   - Namespace: cascade would delete the entire namespace.
+//   - CustomResourceDefinition: left on cluster for upgrade safety (ODH deployCRD pattern);
+//     also never deleted during cleanup so Notebook CRs are not wiped.
+//   - ImageStream: matches live RHOAI / ODH behavior; cleaned via label-based finalizer cleanup.
+var skipOwnerRefKinds = map[string]bool{
+	"Namespace":                true,
+	"CustomResourceDefinition": true,
+	"ImageStream":              true,
+}
+
 func isNamespaced(obj *unstructured.Unstructured) bool {
 	return !clusterScopedKinds[obj.GetKind()]
+}
+
+func shouldSetOwnerReference(obj *unstructured.Unstructured) bool {
+	return !skipOwnerRefKinds[obj.GetKind()]
 }
 
 // patchKustomizeNamespace sets the namespace field in the kustomization file
@@ -382,12 +435,131 @@ var cleanupGVKs = []schema.GroupVersionKind{
 }
 
 // cleanupClusterGVKs lists the GroupVersionKinds of cluster-scoped resources to clean up.
+// CustomResourceDefinitions are intentionally omitted: ODH never owned or GCd CRDs, and
+// deleting notebooks.kubeflow.org would cascade-delete all Notebook instances.
 var cleanupClusterGVKs = []schema.GroupVersionKind{
 	{Group: "rbac.authorization.k8s.io", Version: "v1", Kind: "ClusterRole"},
 	{Group: "rbac.authorization.k8s.io", Version: "v1", Kind: "ClusterRoleBinding"},
 	{Group: "admissionregistration.k8s.io", Version: "v1", Kind: "MutatingWebhookConfiguration"},
 	{Group: "admissionregistration.k8s.io", Version: "v1", Kind: "ValidatingWebhookConfiguration"},
-	{Group: "apiextensions.k8s.io", Version: "v1", Kind: "CustomResourceDefinition"},
+}
+
+// objectRef uniquely identifies a managed resource for desired-set GC.
+type objectRef struct {
+	gvk       schema.GroupVersionKind
+	namespace string
+	name      string
+}
+
+func objectRefFrom(obj *unstructured.Unstructured) objectRef {
+	return objectRef{
+		gvk:       obj.GroupVersionKind(),
+		namespace: obj.GetNamespace(),
+		name:      obj.GetName(),
+	}
+}
+
+func componentMatchingLabels() client.MatchingLabels {
+	return client.MatchingLabels{
+		metadata.ComponentLabelKey: metadata.LabelTrue,
+		metadata.PartOfLabelKey:    metadata.ComponentLabelValue,
+	}
+}
+
+// gcOrphanedResources deletes labeled managed resources that are no longer in the
+// rendered desired set (continuous GC, matching ODH gc.NewAction intent).
+// Skips when desired is empty to avoid wiping the cluster if rendering produced nothing.
+// CRDs are never GCd (not listed in cleanupClusterGVKs).
+func (r *WorkbenchesReconciler) gcOrphanedResources(
+	ctx context.Context,
+	namespace string,
+	desired map[objectRef]struct{},
+) error {
+	l := log.FromContext(ctx)
+
+	if len(desired) == 0 {
+		l.Info("skipping continuous GC: no desired resources rendered")
+
+		return nil
+	}
+
+	l.V(1).Info("running continuous GC for orphaned managed resources",
+		"desired", len(desired),
+		"namespace", namespace)
+
+	var errs []error
+	componentLabel := componentMatchingLabels()
+
+	for _, gvk := range cleanupGVKs {
+		list := &unstructured.UnstructuredList{}
+		list.SetGroupVersionKind(gvk)
+
+		if err := r.List(ctx, list, client.InNamespace(namespace), componentLabel); err != nil {
+			if meta.IsNoMatchError(err) {
+				l.V(1).Info("skipping GVK during GC (API not available)", "gvk", gvk)
+
+				continue
+			}
+
+			errs = append(errs, fmt.Errorf("failed to list %s for GC: %w", gvk, err))
+
+			continue
+		}
+
+		for i := range list.Items {
+			obj := &list.Items[i]
+			ref := objectRefFrom(obj)
+			if _, keep := desired[ref]; keep {
+				continue
+			}
+
+			l.Info("garbage-collecting orphaned resource",
+				"kind", obj.GetKind(),
+				"name", obj.GetName(),
+				"namespace", obj.GetNamespace())
+
+			if err := r.Delete(ctx, obj); client.IgnoreNotFound(err) != nil {
+				errs = append(errs, fmt.Errorf("failed to GC %s %s/%s: %w",
+					obj.GetKind(), obj.GetNamespace(), obj.GetName(), err))
+			}
+		}
+	}
+
+	for _, gvk := range cleanupClusterGVKs {
+		list := &unstructured.UnstructuredList{}
+		list.SetGroupVersionKind(gvk)
+
+		if err := r.List(ctx, list, componentLabel); err != nil {
+			if meta.IsNoMatchError(err) {
+				l.V(1).Info("skipping cluster GVK during GC (API not available)", "gvk", gvk)
+
+				continue
+			}
+
+			errs = append(errs, fmt.Errorf("failed to list cluster %s for GC: %w", gvk, err))
+
+			continue
+		}
+
+		for i := range list.Items {
+			obj := &list.Items[i]
+			ref := objectRefFrom(obj)
+			if _, keep := desired[ref]; keep {
+				continue
+			}
+
+			l.Info("garbage-collecting orphaned cluster resource",
+				"kind", obj.GetKind(),
+				"name", obj.GetName())
+
+			if err := r.Delete(ctx, obj); client.IgnoreNotFound(err) != nil {
+				errs = append(errs, fmt.Errorf("failed to GC %s %s: %w",
+					obj.GetKind(), obj.GetName(), err))
+			}
+		}
+	}
+
+	return errors.Join(errs...)
 }
 
 // cleanupManagedResources deletes all resources that were applied by this operator,
@@ -400,10 +572,7 @@ func (r *WorkbenchesReconciler) cleanupManagedResources(ctx context.Context, nam
 
 	var errs []error
 
-	componentLabel := client.MatchingLabels{
-		metadata.ComponentLabelKey: metadata.LabelTrue,
-		metadata.PartOfLabelKey:    metadata.ComponentLabelValue,
-	}
+	componentLabel := componentMatchingLabels()
 
 	for _, gvk := range cleanupGVKs {
 		list := &unstructured.UnstructuredList{}

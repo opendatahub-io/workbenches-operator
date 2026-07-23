@@ -23,8 +23,10 @@ import (
 	"strconv"
 	"time"
 
+	admissionregistrationv1 "k8s.io/api/admissionregistration/v1"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
+	rbacv1 "k8s.io/api/rbac/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -87,7 +89,7 @@ type WorkbenchesReconciler struct {
 // escalate and bind for RBAC resources are granted in a separate hand-maintained ClusterRole
 // (config/rbac/rbac_escalate_role.yaml) scoped to specific resourceNames from upstream manifests.
 // +kubebuilder:rbac:groups=rbac.authorization.k8s.io,resources=roles;rolebindings;clusterroles;clusterrolebindings,verbs=get;list;watch;create;update;patch;delete
-// +kubebuilder:rbac:groups=apiextensions.k8s.io,resources=customresourcedefinitions,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=apiextensions.k8s.io,resources=customresourcedefinitions,verbs=get;list;watch;create;update;patch
 // Write verbs are required because the operator creates/patches webhook configs from upstream manifests via SSA
 // and deletes them during component removal.
 // +kubebuilder:rbac:groups=admissionregistration.k8s.io,resources=mutatingwebhookconfigurations;validatingwebhookconfigurations,verbs=get;list;watch;create;update;patch;delete
@@ -132,18 +134,21 @@ func (r *WorkbenchesReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 // A custom rate limiter is configured with exponential backoff (5s base, 5m max)
 // to avoid tight retry loops on persistent failures like missing manifests.
 func (r *WorkbenchesReconciler) SetupWithManager(mgr ctrl.Manager) error {
-	// TODO: Add Owns() watches for managed child resources once applyObjects() sets
-	// OwnerReferences on created objects. Without owner refs, Owns() watches are
-	// ineffective because controller-runtime relies on them to map child events
-	// back to the parent Workbenches CR.
-	// See: https://github.com/opendatahub-io/workbenches-operator/issues/30
 	ctrlBuilder := ctrl.NewControllerManagedBy(mgr).
 		For(&componentsv1alpha1.Workbenches{}, builder.WithPredicates(predicate.GenerationChangedPredicate{})).
-		Watches(
-			&appsv1.Deployment{},
-			handler.EnqueueRequestsFromMapFunc(r.mapComponentDeploymentToWorkbenches),
-			builder.WithPredicates(deploymentAvailabilityChangedPredicate{}),
-		).
+		// Owned operands — OwnerReferences are set in applyObjects via SetControllerReference.
+		Owns(&corev1.ConfigMap{}).
+		Owns(&corev1.Secret{}).
+		Owns(&corev1.Service{}).
+		Owns(&corev1.ServiceAccount{}).
+		Owns(&rbacv1.Role{}).
+		Owns(&rbacv1.RoleBinding{}).
+		Owns(&rbacv1.ClusterRole{}).
+		Owns(&rbacv1.ClusterRoleBinding{}).
+		Owns(&admissionregistrationv1.MutatingWebhookConfiguration{}).
+		Owns(&admissionregistrationv1.ValidatingWebhookConfiguration{}).
+		// Deployments also need status (replica) updates, not only generation changes.
+		Owns(&appsv1.Deployment{}, builder.WithPredicates(deploymentAvailabilityChangedPredicate{})).
 		Named("workbenches").
 		WithOptions(controller.Options{
 			RateLimiter: workqueue.NewTypedItemExponentialFailureRateLimiter[ctrl.Request](
@@ -174,36 +179,6 @@ func (r *WorkbenchesReconciler) mapPlatformConfigToWorkbenches(_ context.Context
 	}
 
 	return []reconcile.Request{{NamespacedName: types.NamespacedName{Name: componentsv1alpha1.WorkbenchesInstanceName}}}
-}
-
-func (r *WorkbenchesReconciler) mapComponentDeploymentToWorkbenches(ctx context.Context, obj client.Object) []reconcile.Request {
-	deploy, ok := obj.(*appsv1.Deployment)
-	if !ok {
-		return nil
-	}
-
-	if deploy.GetLabels()[metadata.ComponentLabelKey] != metadata.LabelTrue {
-		return nil
-	}
-
-	wb := &componentsv1alpha1.Workbenches{}
-
-	err := r.Get(ctx, types.NamespacedName{Name: componentsv1alpha1.WorkbenchesInstanceName}, wb)
-	if err != nil {
-		if !errors.IsNotFound(err) {
-			log.FromContext(ctx).Error(err, "failed to get Workbenches for deployment watch")
-		}
-
-		return nil
-	}
-
-	if deploy.GetNamespace() != r.resolveWorkbenchNamespace(wb) {
-		return nil
-	}
-
-	return []reconcile.Request{{
-		NamespacedName: types.NamespacedName{Name: componentsv1alpha1.WorkbenchesInstanceName},
-	}}
 }
 
 type deploymentAvailabilityChangedPredicate struct{}
@@ -374,7 +349,7 @@ func (r *WorkbenchesReconciler) reconcileManaged(ctx context.Context, wb *compon
 
 	nsName := r.resolveWorkbenchNamespace(wb)
 
-	if err = r.renderAndApply(ctx, params, nsName, wb.Spec.Platform); err != nil {
+	if err = r.renderAndApply(ctx, wb, params, nsName, wb.Spec.Platform); err != nil {
 		return r.setErrorStatus(ctx, wb, "ManifestApplyFailed", err)
 	}
 

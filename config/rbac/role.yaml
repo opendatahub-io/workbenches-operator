@@ -56,7 +56,6 @@ rules:
   - customresourcedefinitions
   verbs:
   - create
-  - delete
   - get
   - list
   - patch
