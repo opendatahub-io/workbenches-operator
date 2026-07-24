@@ -97,7 +97,20 @@ Upstream component manifests are stored in `opt/manifests/` and committed to the
 
 The manifest-sync workflow needs permission to open PRs. Enable **Settings → Actions → General → Allow GitHub Actions to create and approve pull requests**, or configure a `MANIFEST_SYNC_PAT` repository secret (PAT with `repo` scope).
 
-The manifest sources are defined in `get_all_manifests.sh`'s `COMPONENT_MANIFESTS` associative array:
+Manifest sources are defined in `get_all_manifests.sh` as two maps (same pattern as
+opendatahub-operator / rhods-operator):
+
+- `ODH_COMPONENT_MANIFESTS` — upstream `opendatahub-io` sources (default)
+- `RHOAI_COMPONENT_MANIFESTS` — downstream `red-hat-data-services` sources
+
+`ODH_PLATFORM_TYPE` selects which map is used (`OpenDataHub` by default; any other
+value such as `rhoai` selects RHOAI). Upstream CI and the daily manifest-sync
+workflow use the ODH map. Downstream `red-hat-data-services/workbenches-operator`
+fetches with `ODH_PLATFORM_TYPE=rhoai` so `opt/manifests/` matches the workbench
+entries in [rhods-operator](https://github.com/red-hat-data-services/rhods-operator)
+prefetched manifests for that release branch.
+
+### ODH (upstream) sources
 
 | Target | Source Repository | Branch | Source Path |
 |--------|-------------------|--------|-------------|
@@ -105,7 +118,15 @@ The manifest sources are defined in `get_all_manifests.sh`'s `COMPONENT_MANIFEST
 | `workbenches/odh-notebook-controller` | `opendatahub-io/kubeflow` | `main` | `components/odh-notebook-controller/config` |
 | `workbenches/notebooks` | `opendatahub-io/notebooks` | `main` | `manifests` |
 
-To pin manifests to a specific commit, update the branch field to include a SHA:
+### RHOAI (downstream) sources
+
+| Target | Source Repository | Branch | Source Path |
+|--------|-------------------|--------|-------------|
+| `workbenches/kf-notebook-controller` | `red-hat-data-services/kubeflow` | `main` | `components/notebook-controller/config` |
+| `workbenches/odh-notebook-controller` | `red-hat-data-services/kubeflow` | `main` | `components/odh-notebook-controller/config` |
+| `workbenches/notebooks` | `red-hat-data-services/notebooks` | `main` | `manifests` |
+
+To pin manifests to a specific commit, update the ref field to include a SHA:
 
 ```shell
 # Format: org:repo:branch@sha:source_path
@@ -114,7 +135,7 @@ To pin manifests to a specific commit, update the branch field to include a SHA:
 
 After modifying manifest sources:
 
-1. Run `make manifests-fetch` to fetch updated manifests locally.
+1. Run `make manifests-fetch` (ODH) or `make manifests-fetch ODH_PLATFORM_TYPE=rhoai` (RHOAI).
 2. Inspect the resulting files in `opt/manifests/` for expected changes.
 3. Run `make test` to ensure the controller still renders manifests correctly.
 4. Commit changes to `get_all_manifests.sh` and `opt/manifests/`.

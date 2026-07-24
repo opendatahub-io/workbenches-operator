@@ -1,13 +1,16 @@
 # `opt/manifests`
 
-This directory contains upstream component manifests fetched by `get_all_manifests.sh`.
+This directory contains component manifests fetched by `get_all_manifests.sh`.
 
 **Do not edit files under `opt/manifests/` manually.**
 
 Manifests are refreshed automatically by the scheduled GitHub Action (`.github/workflows/manifest-sync.yaml`) or locally via:
 
 ```shell
-make manifests-fetch
+make manifests-fetch                              # ODH (default)
+make manifests-fetch ODH_PLATFORM_TYPE=rhoai      # RHOAI / downstream
 ```
 
-Commit changes only after running the fetch script. See `DEPENDENCIES.md` for upstream source configuration and upgrade steps.
+`ODH_PLATFORM_TYPE` selects ODH (`opendatahub-io`) or RHOAI (`red-hat-data-services`) sources defined in `get_all_manifests.sh`. Upstream commits ODH manifests; downstream builds fetch with `ODH_PLATFORM_TYPE=rhoai`.
+
+Commit changes only after running the fetch script. See `DEPENDENCIES.md` for source configuration and upgrade steps.

@@ -30,9 +30,14 @@ help: ## Display this help.
 
 ##@ Development
 
+# ODH_PLATFORM_TYPE selects manifest sources in get_all_manifests.sh:
+#   OpenDataHub (default) — opendatahub-io upstream
+#   any other value (e.g. rhoai) — red-hat-data-services RHOAI/downstream
+ODH_PLATFORM_TYPE ?= OpenDataHub
+
 .PHONY: manifests-fetch
-manifests-fetch: ## Fetch upstream component manifests into opt/manifests/ (for local dev or manual sync).
-	bash get_all_manifests.sh
+manifests-fetch: ## Fetch component manifests into opt/manifests/ (ODH_PLATFORM_TYPE=OpenDataHub|rhoai).
+	ODH_PLATFORM_TYPE=$(ODH_PLATFORM_TYPE) bash get_all_manifests.sh
 
 .PHONY: manifests
 manifests: controller-gen ## Generate WebhookConfiguration, ClusterRole and CustomResourceDefinition objects.

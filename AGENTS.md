@@ -11,7 +11,7 @@ This is a Kubernetes operator (built with Kubebuilder/controller-runtime) that m
 
 - **Singleton CR**: Only one `Workbenches` resource is allowed, and it must be named `default-workbenches`. Enforced via CEL on the CRD (`WorkbenchesInstanceName` in `api/v1alpha1`).
 - **Manifest rendering**: The operator reads Kustomize bundles from a filesystem path (`--manifests-base-path`, default `/opt/manifests`) and renders them at runtime with the krusty engine — it does not embed manifests in Go code.
-- **Committed manifests**: Upstream operand manifests under `opt/manifests/` are fetched by `get_all_manifests.sh`, committed to the repo, and copied into the image at build time. Do not hand-edit them.
+- **Committed manifests**: Operand manifests under `opt/manifests/` are fetched by `get_all_manifests.sh`, committed to the repo, and copied into the image at build time. Do not hand-edit them. The script has ODH and RHOAI source maps; `ODH_PLATFORM_TYPE` selects which (`OpenDataHub` default vs e.g. `rhoai` for downstream).
 - **Server-side apply**: Manifest application uses SSA with field manager `workbenches-operator`.
 - **Platform awareness**: Platforms `OpenDataHub` and `SelfManagedRhoai` select different notebook overlays and default namespaces.
 - **Immutable fields**: `workbenchNamespace` is immutable after initial creation (CEL-enforced).

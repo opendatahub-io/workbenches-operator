@@ -52,25 +52,26 @@ Upstream manifests are **committed** under `opt/manifests/` for hermetic contain
      (OpenShift overlay)             (base)                          (ODH or RHOAI overlay)
 ```
 
-### Upstream manifest sources
+### Manifest sources (ODH and RHOAI)
 
-Manifests under `opt/manifests/` are fetched from upstream repositories and committed to this repo:
+Manifests under `opt/manifests/` are fetched and committed to this repo. Sources are defined in `get_all_manifests.sh` as ODH (upstream) and RHOAI (downstream) maps, selected by `ODH_PLATFORM_TYPE` — same pattern as opendatahub-operator / rhods-operator.
 
-| Component | Source repository | Path |
-|-----------|-------------------|------|
-| `workbenches/kf-notebook-controller` | [opendatahub-io/kubeflow](https://github.com/opendatahub-io/kubeflow) | `components/notebook-controller/config` |
-| `workbenches/odh-notebook-controller` | [opendatahub-io/kubeflow](https://github.com/opendatahub-io/kubeflow) | `components/odh-notebook-controller/config` |
-| `workbenches/notebooks` | [opendatahub-io/notebooks](https://github.com/opendatahub-io/notebooks) | `manifests` |
+| Component | ODH (upstream) | RHOAI (downstream) | Path |
+|-----------|----------------|-------------------|------|
+| `workbenches/kf-notebook-controller` | [opendatahub-io/kubeflow](https://github.com/opendatahub-io/kubeflow) | [red-hat-data-services/kubeflow](https://github.com/red-hat-data-services/kubeflow) | `components/notebook-controller/config` |
+| `workbenches/odh-notebook-controller` | [opendatahub-io/kubeflow](https://github.com/opendatahub-io/kubeflow) | [red-hat-data-services/kubeflow](https://github.com/red-hat-data-services/kubeflow) | `components/odh-notebook-controller/config` |
+| `workbenches/notebooks` | [opendatahub-io/notebooks](https://github.com/opendatahub-io/notebooks) | [red-hat-data-services/notebooks](https://github.com/red-hat-data-services/notebooks) | `manifests` |
 
 **Local refresh:**
 
 ```bash
-make manifests-fetch
+make manifests-fetch                              # ODH / upstream (default)
+make manifests-fetch ODH_PLATFORM_TYPE=rhoai      # RHOAI / downstream
 ```
 
 Do not edit files under `opt/manifests/` manually. After fetching, inspect the tree, run `make test`, then commit both `get_all_manifests.sh` (if sources changed) and `opt/manifests/`.
 
-A scheduled GitHub Action ([`.github/workflows/manifest-sync.yaml`](.github/workflows/manifest-sync.yaml)) runs daily, refreshes manifests, validates rendering with `TestRenderRealManifests`, and opens/updates a PR when content changes. See [`opt/README.md`](opt/README.md) and [`DEPENDENCIES.md`](DEPENDENCIES.md).
+A scheduled GitHub Action ([`.github/workflows/manifest-sync.yaml`](.github/workflows/manifest-sync.yaml)) runs daily, refreshes **ODH** manifests, validates rendering with `TestRenderRealManifests`, and opens/updates a PR when content changes. See [`opt/README.md`](opt/README.md) and [`DEPENDENCIES.md`](DEPENDENCIES.md).
 
 The sync workflow needs permission to open PRs: enable **Settings → Actions → General → Allow GitHub Actions to create and approve pull requests**, or configure a fine-grained personal access token (scoped to this repository with `contents: write` and `pull_requests: write`) as a repository secret.
 
@@ -78,6 +79,7 @@ Override individual sources:
 
 ```bash
 ./get_all_manifests.sh --workbenches/kf-notebook-controller=org:repo:branch@sha:source_path
+ODH_PLATFORM_TYPE=rhoai ./get_all_manifests.sh
 ```
 
 ### Platform support
@@ -404,7 +406,7 @@ Run `make help` for the full list. Common targets:
 
 | Target | Description |
 |--------|-------------|
-| `manifests-fetch` | Download upstream manifests to `opt/manifests/` |
+| `manifests-fetch` | Download ODH or RHOAI manifests to `opt/manifests/` (`ODH_PLATFORM_TYPE`) |
 | `manifests` / `generate` | Regenerate CRD/RBAC/webhooks and DeepCopy code |
 | `lint` / `lint-fix` | Run golangci-lint |
 | `test` / `unit-test` | Run Go tests |

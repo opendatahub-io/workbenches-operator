@@ -73,6 +73,8 @@ jobs:
             deployment/service-ca -n openshift-service-ca
 
       - name: Fetch upstream manifests
+        env:
+          ODH_PLATFORM_TYPE: OpenDataHub
         run: make manifests-fetch
 
       - name: Build operator image
