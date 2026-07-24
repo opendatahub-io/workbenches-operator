@@ -44,7 +44,11 @@ import (
 	"github.com/opendatahub-io/workbenches-operator/internal/metadata"
 )
 
-const specField = "spec"
+const (
+	specField = "spec"
+
+	kueueQueueNameLabel = "kueue.x-k8s.io/queue-name"
+)
 
 var (
 	notebookContainersPath   = []string{specField, "template", specField, "containers"}
@@ -348,6 +352,12 @@ func (i *Injector) handleHWPRemoval(
 }
 
 func (i *Injector) removeHWPSettings(obj, hwp *unstructured.Unstructured) error {
+	// Remove Kueue label if the old HWP had Kueue scheduling
+	kueueQueueName, _, _ := unstructured.NestedString(hwp.Object, "spec", "scheduling", "kueue", "localQueueName")
+	if kueueQueueName != "" {
+		removeLabel(obj, kueueQueueNameLabel)
+	}
+
 	nodeSelector, nsFound, _ := unstructured.NestedStringMap(hwp.Object, "spec", "scheduling", "node", "nodeSelector")
 	if nsFound && len(nodeSelector) > 0 {
 		if err := removeHWPNodeSelector(obj, notebookNodeSelectorPath, nodeSelector); err != nil {
@@ -472,6 +482,7 @@ func (i *Injector) applyHardwareProfileToNotebook(
 		log.V(1).Info("clearing existing scheduling settings due to profile change",
 			"workload", notebook.GetName(), "hardwareProfile", hwp.GetName())
 
+		removeLabel(notebook, kueueQueueNameLabel)
 		unstructured.RemoveNestedField(notebook.Object, notebookNodeSelectorPath...)
 		unstructured.RemoveNestedField(notebook.Object, notebookTolerationsPath...)
 	}
@@ -481,6 +492,25 @@ func (i *Injector) applyHardwareProfileToNotebook(
 		if err := applyResourcesToNotebookContainer(ctx, identifiers, notebook, profileChanged); err != nil {
 			return nil, fmt.Errorf("failed to apply resource requirements: %w", err)
 		}
+	}
+
+	// Apply Kueue LocalQueue label if spec.scheduling.kueue.localQueueName is set.
+	// When Kueue scheduling is active, node scheduling (nodeSelector/tolerations) is skipped
+	// because Kueue handles pod placement via its queue configuration.
+	kueueQueueName, _, _ := unstructured.NestedString(hwp.Object, "spec", "scheduling", "kueue", "localQueueName")
+	if kueueQueueName != "" {
+		if !profileChanged {
+			existingValue := getLabel(notebook, kueueQueueNameLabel)
+			if existingValue != "" && existingValue != kueueQueueName {
+				warnings = append(warnings, fmt.Sprintf(
+					"label '%s' has value '%s' which will be overwritten by HardwareProfile '%s' which has value '%s'",
+					kueueQueueNameLabel, existingValue, hwp.GetName(), kueueQueueName))
+			}
+		}
+
+		setLabel(notebook, kueueQueueNameLabel, kueueQueueName)
+
+		return warnings, nil
 	}
 
 	nodeSelector, nsFound, _ := unstructured.NestedStringMap(hwp.Object, "spec", "scheduling", "node", "nodeSelector")
@@ -785,4 +815,33 @@ func removeAnnotation(obj *unstructured.Unstructured, key string) {
 
 	delete(annotations, key)
 	obj.SetAnnotations(annotations)
+}
+
+func getLabel(obj *unstructured.Unstructured, key string) string {
+	labels := obj.GetLabels()
+	if labels == nil {
+		return ""
+	}
+
+	return labels[key]
+}
+
+func setLabel(obj *unstructured.Unstructured, key, value string) {
+	labels := obj.GetLabels()
+	if labels == nil {
+		labels = make(map[string]string)
+	}
+
+	labels[key] = value
+	obj.SetLabels(labels)
+}
+
+func removeLabel(obj *unstructured.Unstructured, key string) {
+	labels := obj.GetLabels()
+	if labels == nil {
+		return
+	}
+
+	delete(labels, key)
+	obj.SetLabels(labels)
 }
