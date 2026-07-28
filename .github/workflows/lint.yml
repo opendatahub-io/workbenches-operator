@@ -101,6 +101,58 @@ jobs:
       - name: Lint Helm chart
         run: make helm-lint
 
+  verify-manifests:
+    name: Verify generated manifests
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-go@v7
+        with:
+          check-latest: true
+          go-version-file: go.mod
+
+      - name: Regenerate CRD, RBAC, webhook manifests
+        run: make manifests
+
+      - name: Check for uncommitted changes
+        run: |
+          git diff
+          if [ -n "$(git status --porcelain)" ]; then
+            echo "Generated manifests are out of date. Run 'make manifests' and commit the result."
+            exit 1
+          fi
+
+  verify-generate:
+    name: Verify generated code
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-go@v7
+        with:
+          check-latest: true
+          go-version-file: go.mod
+
+      - name: Regenerate DeepCopy methods
+        run: make generate
+
+      - name: Check for uncommitted changes
+        run: |
+          git diff
+          if [ -n "$(git status --porcelain)" ]; then
+            echo "Generated code is out of date. Run 'make generate' and commit the result."
+            exit 1
+          fi
+
   chart-verify-sync:
     name: Chart sync verification
     runs-on: ubuntu-latest
