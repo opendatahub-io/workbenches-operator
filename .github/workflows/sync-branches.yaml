@@ -143,30 +143,29 @@ jobs:
           fi
 
           #########################################################################
-          # Always keep target branch state for .tekton
-          # (do not propagate any .tekton changes from source branch).
+          # Always keep target branch state for .tekton and opt/manifests
+          # (do not propagate changes from source branch).
           # Caveats:
           # - This applies to any source/target pair using this workflow.
-          # - If target does not contain .tekton, any merged .tekton content from
-          #   source will be removed.
+          # - If target does not contain a guarded directory, any merged content
+          #   from source will be removed.
           # - This guard exists only in this workflow; manual merges can still
-          #   propagate .tekton unless handled similarly.
+          #   propagate these directories unless handled similarly.
 
-          # Reset .tekton completely to target (HEAD) state
-          git rm -r -f --cached --ignore-unmatch -- ':/.tekton'
-          rm -rf -- "$(git rev-parse --show-toplevel)/.tekton"
+          for DIR in .tekton opt/manifests; do
+            git rm -r -f --cached --ignore-unmatch -- ":/$(echo "${DIR}")"
+            rm -rf -- "$(git rev-parse --show-toplevel)/${DIR}"
 
-          # Re-checkout .tekton only if it exists on target
-          if git rev-parse --verify HEAD:.tekton >/dev/null 2>&1; then
-            echo "Keeping target branch version of .tekton."
-            git checkout HEAD -- ':/.tekton'
-            git add -A -- ':/.tekton'
-          fi
+            if git rev-parse --verify "HEAD:${DIR}" >/dev/null 2>&1; then
+              echo "Keeping target branch version of ${DIR}."
+              git checkout HEAD -- ":/$(echo "${DIR}")"
+              git add -A -- ":/$(echo "${DIR}")"
+            fi
+          done
           #########################################################################
 
           # Known files to resolve conflicts by keeping the target branch version
           # (typically branch-specific image tags / params).
-          # opt/manifests is always taken from the source branch (no special handling).
           FILES=(
             "charts/operator/params.env"
           )
