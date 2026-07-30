@@ -66,6 +66,7 @@ const (
 	conditionReasonImageStreamsNotReady = "ImageStreamsNotReady"
 	conditionReasonUnknown              = "Unknown"
 	conditionReasonAvailable            = "Available"
+	conditionReasonReconcileSuccess     = "ReconcileSuccess"
 	requeueDelay                        = 30 * time.Second
 
 	rateLimiterBaseDelay = 5 * time.Second
@@ -610,7 +611,7 @@ func (r *WorkbenchesReconciler) setReadyCondition(
 		meta.SetStatusCondition(&wb.Status.Conditions, metav1.Condition{
 			Type:               conditionTypeReady,
 			Status:             metav1.ConditionTrue,
-			Reason:             "ReconcileSuccess",
+			Reason:             conditionReasonReconcileSuccess,
 			Message:            "Workbenches component is ready",
 			ObservedGeneration: wb.Generation,
 		})

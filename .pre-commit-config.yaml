@@ -1,0 +1,38 @@
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-yaml
+        args: [--allow-multiple-documents]
+        exclude: ^charts/.*/templates/
+      - id: check-merge-conflict
+      - id: check-added-large-files
+
+  - repo: local
+    hooks:
+      - id: golangci-lint
+        name: golangci-lint
+        entry: golangci-lint run --timeout=5m ./...
+        language: golang
+        additional_dependencies: ['github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.12.2']
+        files: \.go$
+        pass_filenames: false
+        types: [go]
+
+      - id: go-mod-tidy
+        name: go mod tidy
+        entry: bash -c 'go mod tidy -diff'
+        language: system
+        files: (\.go$|^go\.(mod|sum)$)
+        pass_filenames: false
+        types: [file]
+
+      - id: go-vet
+        name: go vet
+        entry: bash -c 'go vet ./...'
+        language: system
+        files: \.go$
+        pass_filenames: false
+        types: [go]

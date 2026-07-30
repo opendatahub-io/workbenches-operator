@@ -11,7 +11,6 @@ linters:
           - lll
         source: "kubebuilder:webhook:|webhook:path="
       - linters:
-          - goconst
           - gocognit
           - nestif
         path: _test\.go
@@ -45,6 +44,12 @@ linters:
       check-type-assertions: true
     goconst:
       min-occurrences: 5
+      ignore-tests: true
+      ignore-string-values:
+        - "^(Namespace|ClusterRole|ClusterRoleBinding|CustomResourceDefinition|ConfigMap|Secret|Service|ServiceAccount|Deployment|Role|RoleBinding|MutatingWebhookConfiguration|ValidatingWebhookConfiguration)$"
+        - "^rbac\\.authorization\\.k8s\\.io$"
+        - "^admissionregistration\\.k8s\\.io$"
+        - "^(apiVersion|kind|metadata)$"
     govet:
       enable-all: true
       disable:

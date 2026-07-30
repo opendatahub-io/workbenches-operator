@@ -50,38 +50,38 @@ func TestDeploymentAvailabilityChangedPredicateUpdate(t *testing.T) {
 	}{
 		{
 			name: "label added",
-			old:  deploymentWithLabel("opendatahub", "deploy-a", false, 1, 1),
-			new:  deploymentWithLabel("opendatahub", "deploy-a", true, 1, 1),
+			old:  deploymentWithLabel("deploy-a", false, 1, 1),
+			new:  deploymentWithLabel("deploy-a", true, 1, 1),
 			want: true,
 		},
 		{
 			name: "label removed",
-			old:  deploymentWithLabel("opendatahub", "deploy-a", true, 1, 1),
-			new:  deploymentWithLabel("opendatahub", "deploy-a", false, 1, 1),
+			old:  deploymentWithLabel("deploy-a", true, 1, 1),
+			new:  deploymentWithLabel("deploy-a", false, 1, 1),
 			want: true,
 		},
 		{
 			name: "ready replicas changed",
-			old:  deploymentWithLabel("opendatahub", "deploy-a", true, 1, 1),
-			new:  deploymentWithLabel("opendatahub", "deploy-a", true, 0, 1),
+			old:  deploymentWithLabel("deploy-a", true, 1, 1),
+			new:  deploymentWithLabel("deploy-a", true, 0, 1),
 			want: true,
 		},
 		{
 			name: "desired replicas changed",
-			old:  deploymentWithLabel("opendatahub", "deploy-a", true, 1, 1),
-			new:  deploymentWithLabel("opendatahub", "deploy-a", true, 1, 2),
+			old:  deploymentWithLabel("deploy-a", true, 1, 1),
+			new:  deploymentWithLabel("deploy-a", true, 1, 2),
 			want: true,
 		},
 		{
 			name: "unrelated update without label",
-			old:  deploymentWithLabel("opendatahub", "deploy-a", false, 1, 1),
-			new:  deploymentWithLabel("opendatahub", "deploy-a", false, 0, 0),
+			old:  deploymentWithLabel("deploy-a", false, 1, 1),
+			new:  deploymentWithLabel("deploy-a", false, 0, 0),
 			want: false,
 		},
 		{
 			name: "no availability change",
-			old:  deploymentWithLabel("opendatahub", "deploy-a", true, 1, 1),
-			new:  deploymentWithLabel("opendatahub", "deploy-a", true, 1, 1),
+			old:  deploymentWithLabel("deploy-a", true, 1, 1),
+			new:  deploymentWithLabel("deploy-a", true, 1, 1),
 			want: false,
 		},
 	}
@@ -102,8 +102,8 @@ func TestDeploymentAvailabilityChangedPredicateCreateDeleteGeneric(t *testing.T)
 	t.Parallel()
 
 	predicate := deploymentAvailabilityChangedPredicate{}
-	labeled := deploymentWithLabel("opendatahub", "deploy-a", true, 1, 1)
-	unlabeled := deploymentWithLabel("opendatahub", "deploy-b", false, 1, 1)
+	labeled := deploymentWithLabel("deploy-a", true, 1, 1)
+	unlabeled := deploymentWithLabel("deploy-b", false, 1, 1)
 
 	if !predicate.Create(event.CreateEvent{Object: labeled}) {
 		t.Fatal("Create() = false, want true for labeled deployment")
@@ -126,7 +126,7 @@ func TestDeploymentAvailabilityChangedPredicateUpdateInvalidType(t *testing.T) {
 	t.Parallel()
 
 	predicate := deploymentAvailabilityChangedPredicate{}
-	labeled := deploymentWithLabel("opendatahub", "deploy-a", true, 1, 1)
+	labeled := deploymentWithLabel("deploy-a", true, 1, 1)
 
 	oldObj := &componentsv1alpha1.Workbenches{
 		ObjectMeta: metav1.ObjectMeta{
@@ -145,20 +145,20 @@ func TestDeploymentAvailabilityChangedPredicateUpdateInvalidType(t *testing.T) {
 func TestHasComponentLabelAndDesiredReplicas(t *testing.T) {
 	t.Parallel()
 
-	if !hasComponentLabel(deploymentWithLabel("opendatahub", "deploy-a", true, 1, 1)) {
+	if !hasComponentLabel(deploymentWithLabel("deploy-a", true, 1, 1)) {
 		t.Fatal("hasComponentLabel() = false, want true")
 	}
-	if hasComponentLabel(deploymentWithLabel("opendatahub", "deploy-a", false, 1, 1)) {
+	if hasComponentLabel(deploymentWithLabel("deploy-a", false, 1, 1)) {
 		t.Fatal("hasComponentLabel() = true, want false")
 	}
 
-	nilReplicas := deploymentWithLabel("opendatahub", "deploy-a", true, 1, 1)
+	nilReplicas := deploymentWithLabel("deploy-a", true, 1, 1)
 	nilReplicas.Spec.Replicas = nil
 	if got := deploymentDesiredReplicas(nilReplicas); got != 1 {
 		t.Fatalf("deploymentDesiredReplicas(nil) = %d, want 1", got)
 	}
 
-	withReplicas := deploymentWithLabel("opendatahub", "deploy-a", true, 1, 3)
+	withReplicas := deploymentWithLabel("deploy-a", true, 1, 3)
 	if got := deploymentDesiredReplicas(withReplicas); got != 3 {
 		t.Fatalf("deploymentDesiredReplicas(3) = %d, want 3", got)
 	}
@@ -279,7 +279,7 @@ func TestShouldWatchImageStreams(t *testing.T) {
 	}
 }
 
-func deploymentWithLabel(namespace, name string, labeled bool, readyReplicas, specReplicas int32) *appsv1.Deployment {
+func deploymentWithLabel(name string, labeled bool, readyReplicas, specReplicas int32) *appsv1.Deployment {
 	labels := map[string]string{}
 	if labeled {
 		labels[metadata.ComponentLabelKey] = metadata.LabelTrue
@@ -290,7 +290,7 @@ func deploymentWithLabel(namespace, name string, labeled bool, readyReplicas, sp
 	return &appsv1.Deployment{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      name,
-			Namespace: namespace,
+			Namespace: "opendatahub",
 			Labels:    labels,
 		},
 		Spec: appsv1.DeploymentSpec{
