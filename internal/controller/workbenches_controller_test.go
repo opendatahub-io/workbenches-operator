@@ -402,6 +402,50 @@ var _ = Describe("Workbenches Controller", func() {
 			Expect(degradedCond.Status).To(Equal(metav1.ConditionFalse))
 		})
 
+		It("Should update platform version on Standalone distribution after version change", func() {
+			nsName := "test-ns-standalone-version-update"
+			ensureNamespace(applicationsNamespace)
+			createDeployment(applicationsNamespace, "odh-notebook-controller")
+
+			// Create the platform ConfigMap with an initial platformVersion but no
+			// distribution fields — this simulates Standalone mode with a version stamp.
+			createPlatformConfig(applicationsNamespace, "", "", "1.0.0")
+
+			wb := createWorkbenches("Managed", nsName, "OpenDataHub")
+
+			DeferCleanup(func() {
+				cleanupWorkbenches(wb)
+				cleanupDeployments(applicationsNamespace)
+				cleanupNamespace(nsName)
+				cleanupPlatformConfig(applicationsNamespace)
+			})
+
+			// Initial reconcile stamps platform version 1.0.0
+			_, err := reconcileWorkbenches(reconciler, wb)
+			Expect(err).NotTo(HaveOccurred())
+
+			updated := getWorkbenches(wb.Name)
+			Expect(updated.Status.Phase).To(Equal(statusutil.PhaseReady))
+			Expect(updated.Status.Distribution.Name).To(Equal(platformconfig.DistributionNameStandalone))
+
+			platformRelease := findPlatformRelease(updated.Status.Releases)
+			Expect(platformRelease).NotTo(BeNil())
+			Expect(platformRelease.Version).To(Equal("1.0.0"))
+
+			// Update the ConfigMap to change the platform version
+			updatePlatformConfig(applicationsNamespace, "", "", "2.0.0")
+
+			_, err = reconciler.Reconcile(ctx, requestFor(wb))
+			Expect(err).NotTo(HaveOccurred())
+
+			updated = getWorkbenches(wb.Name)
+			Expect(updated.Status.Phase).To(Equal(statusutil.PhaseReady))
+
+			platformRelease = findPlatformRelease(updated.Status.Releases)
+			Expect(platformRelease).NotTo(BeNil())
+			Expect(platformRelease.Version).To(Equal("2.0.0"))
+		})
+
 		It("Should fall back to standalone when ApplicationsNamespace is not configured", func() {
 			fallbackNS := "opendatahub"
 			ensureNamespace(fallbackNS)

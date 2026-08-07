@@ -501,11 +501,13 @@ func (r *WorkbenchesReconciler) reconcileManaged(ctx context.Context, wb *compon
 		wasPlatformVersionPending = readyCond.Reason == "PlatformVersionPending"
 	}
 
+	handshakeRequired := platformconfig.HandshakeRequired(desiredDistribution)
+
 	reconciledPlatformVersion := currentPlatformVersion
 	if deploymentsReady &&
 		platformVersion != "" &&
 		currentPlatformVersion != platformVersion &&
-		(currentPlatformVersion == "" || wasPlatformVersionPending) {
+		(currentPlatformVersion == "" || wasPlatformVersionPending || !handshakeRequired) {
 		platformconfig.SetPlatformRelease(&wb.Status.Releases, platformVersion)
 		reconciledPlatformVersion = platformVersion
 	}
@@ -539,7 +541,6 @@ func (r *WorkbenchesReconciler) reconcileManaged(ctx context.Context, wb *compon
 
 	l.Info("reconciliation complete", "phase", wb.Status.Phase)
 
-	handshakeRequired := platformconfig.HandshakeRequired(desiredDistribution)
 	if !deploymentsReady ||
 		!platformconfig.DistributionAligned(desiredDistribution, wb.Status.Distribution) ||
 		(handshakeRequired && !platformconfig.HandshakeComplete(platformVersion, wb.Status.Releases)) {
