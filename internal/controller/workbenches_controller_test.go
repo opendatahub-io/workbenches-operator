@@ -1037,6 +1037,119 @@ var _ = Describe("Workbenches Controller", func() {
 			Expect(readyCond.Status).To(Equal(metav1.ConditionFalse))
 		})
 	})
+
+	Context("WorkbenchesV2 submodule condition", func() {
+		It("Should set WorkbenchesV2Ready=False/Removed when workbenchesV2 is nil", func() {
+			wb := createWorkbenches("Managed", "test-ns-v2-nil", "OpenDataHub")
+
+			DeferCleanup(func() {
+				cleanupWorkbenches(wb)
+				cleanupNamespace("test-ns-v2-nil")
+			})
+
+			_, err := reconcileWorkbenches(reconciler, wb)
+			Expect(err).NotTo(HaveOccurred())
+
+			updated := getWorkbenches(wb.Name)
+			v2Cond := meta.FindStatusCondition(updated.Status.Conditions, "WorkbenchesV2Ready")
+			Expect(v2Cond).NotTo(BeNil())
+			Expect(v2Cond.Status).To(Equal(metav1.ConditionFalse))
+			Expect(v2Cond.Reason).To(Equal("Removed"))
+		})
+
+		It("Should set WorkbenchesV2Ready=False/Removed when workbenchesV2 is explicitly Removed", func() {
+			wb := createWorkbenches("Managed", "test-ns-v2-removed", "OpenDataHub")
+
+			DeferCleanup(func() {
+				cleanupWorkbenches(wb)
+				cleanupNamespace("test-ns-v2-removed")
+			})
+
+			updated := getWorkbenches(wb.Name)
+			updated.Spec.WorkbenchesV2 = &componentsv1alpha1.WorkbenchesV2Spec{ManagementState: "Removed"}
+			Expect(k8sClient.Update(ctx, updated)).To(Succeed())
+
+			_, err := reconcileWorkbenches(reconciler, wb)
+			Expect(err).NotTo(HaveOccurred())
+
+			final := getWorkbenches(wb.Name)
+			v2Cond := meta.FindStatusCondition(final.Status.Conditions, "WorkbenchesV2Ready")
+			Expect(v2Cond).NotTo(BeNil())
+			Expect(v2Cond.Status).To(Equal(metav1.ConditionFalse))
+			Expect(v2Cond.Reason).To(Equal("Removed"))
+		})
+
+		It("Should set WorkbenchesV2Ready=False/ManifestsNotAvailable when Managed but no manifests", func() {
+			wb := createWorkbenches("Managed", "test-ns-v2-no-manifests", "OpenDataHub")
+
+			DeferCleanup(func() {
+				cleanupWorkbenches(wb)
+				cleanupNamespace("test-ns-v2-no-manifests")
+			})
+
+			updated := getWorkbenches(wb.Name)
+			updated.Spec.WorkbenchesV2 = &componentsv1alpha1.WorkbenchesV2Spec{ManagementState: "Managed"}
+			Expect(k8sClient.Update(ctx, updated)).To(Succeed())
+
+			_, err := reconcileWorkbenches(reconciler, wb)
+			Expect(err).NotTo(HaveOccurred())
+
+			final := getWorkbenches(wb.Name)
+			v2Cond := meta.FindStatusCondition(final.Status.Conditions, "WorkbenchesV2Ready")
+			Expect(v2Cond).NotTo(BeNil())
+			Expect(v2Cond.Status).To(Equal(metav1.ConditionFalse))
+			Expect(v2Cond.Reason).To(Equal("ManifestsNotAvailable"))
+		})
+
+		It("Should set WorkbenchesV2Ready=True/Available when Managed and manifests exist", func() {
+			v2Dir := filepath.Join(manifestsDir, "workbenches", "workbenches-v2", "base")
+			Expect(os.MkdirAll(v2Dir, 0o750)).To(Succeed())
+			Expect(os.WriteFile(filepath.Join(v2Dir, "kustomization.yaml"),
+				[]byte("apiVersion: kustomize.config.k8s.io/v1beta1\nkind: Kustomization\nresources: []\n"), 0o600)).To(Succeed())
+
+			wb := createWorkbenches("Managed", "test-ns-v2-available", "OpenDataHub")
+
+			DeferCleanup(func() {
+				cleanupWorkbenches(wb)
+				cleanupNamespace("test-ns-v2-available")
+			})
+
+			updated := getWorkbenches(wb.Name)
+			updated.Spec.WorkbenchesV2 = &componentsv1alpha1.WorkbenchesV2Spec{ManagementState: "Managed"}
+			Expect(k8sClient.Update(ctx, updated)).To(Succeed())
+
+			_, err := reconcileWorkbenches(reconciler, wb)
+			Expect(err).NotTo(HaveOccurred())
+
+			final := getWorkbenches(wb.Name)
+			v2Cond := meta.FindStatusCondition(final.Status.Conditions, "WorkbenchesV2Ready")
+			Expect(v2Cond).NotTo(BeNil())
+			Expect(v2Cond.Status).To(Equal(metav1.ConditionTrue))
+			Expect(v2Cond.Reason).To(Equal("Available"))
+		})
+
+		It("Should set WorkbenchesV2Ready=False/Removed when global managementState is Removed", func() {
+			wb := createWorkbenches("Removed", "test-ns-v2-global-removed", "OpenDataHub")
+
+			DeferCleanup(func() {
+				cleanupWorkbenches(wb)
+				cleanupNamespace("test-ns-v2-global-removed")
+			})
+
+			updated := getWorkbenches(wb.Name)
+			updated.Spec.WorkbenchesV2 = &componentsv1alpha1.WorkbenchesV2Spec{ManagementState: "Managed"}
+			Expect(k8sClient.Update(ctx, updated)).To(Succeed())
+
+			_, err := reconcileWorkbenches(reconciler, wb)
+			Expect(err).NotTo(HaveOccurred())
+
+			final := getWorkbenches(wb.Name)
+			v2Cond := meta.FindStatusCondition(final.Status.Conditions, "WorkbenchesV2Ready")
+			Expect(v2Cond).NotTo(BeNil())
+			Expect(v2Cond.Status).To(Equal(metav1.ConditionFalse))
+			Expect(v2Cond.Reason).To(Equal("Removed"))
+		})
+	})
 })
 
 // Test helpers

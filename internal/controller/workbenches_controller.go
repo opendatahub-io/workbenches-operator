@@ -62,7 +62,9 @@ const (
 	conditionTypeDeploymentsAvailable     = "DeploymentsAvailable"
 	conditionTypeReleaseMetadataAvailable = "ReleaseMetadataAvailable"
 	// ImageStreamsAvailable is informational only (matches ODH); it does not gate Ready.
-	conditionTypeImageStreamsAvailable  = "ImageStreamsAvailable"
+	conditionTypeImageStreamsAvailable = "ImageStreamsAvailable"
+	// WorkbenchesV2Ready is informational only; it does not gate Ready.
+	conditionTypeWorkbenchesV2Ready = "WorkbenchesV2Ready"
 	conditionReasonImageStreamsNotReady = "ImageStreamsNotReady"
 	conditionReasonUnknown              = "Unknown"
 	conditionReasonAvailable            = "Available"
@@ -374,6 +376,14 @@ func (r *WorkbenchesReconciler) reconcileRemoved(ctx context.Context, wb *compon
 		ObservedGeneration: wb.Generation,
 	})
 
+	meta.SetStatusCondition(&wb.Status.Conditions, metav1.Condition{
+		Type:               conditionTypeWorkbenchesV2Ready,
+		Status:             metav1.ConditionFalse,
+		Reason:             "Removed",
+		Message:            "Workbenches component has been removed",
+		ObservedGeneration: wb.Generation,
+	})
+
 	wb.Status.Phase = statusutil.ComputePhase(statusutil.PhaseContext{Removed: true})
 	wb.Status.Releases = nil
 	wb.Status.Distribution = componentsv1alpha1.Distribution{}
@@ -483,6 +493,8 @@ func (r *WorkbenchesReconciler) reconcileManaged(ctx context.Context, wb *compon
 		ObservedGeneration: wb.Generation,
 	})
 
+	r.setWorkbenchesV2Condition(wb)
+
 	deploymentsReady, deployMsg := r.checkDeployments(ctx, wb)
 	r.setDeploymentCondition(wb, deploymentsReady, deployMsg)
 
@@ -569,6 +581,40 @@ func (r *WorkbenchesReconciler) setDeploymentCondition(wb *componentsv1alpha1.Wo
 			ObservedGeneration: wb.Generation,
 		})
 	}
+}
+
+func (r *WorkbenchesReconciler) setWorkbenchesV2Condition(wb *componentsv1alpha1.Workbenches) {
+	if !wb.Spec.IsWorkbenchesV2Managed() {
+		meta.SetStatusCondition(&wb.Status.Conditions, metav1.Condition{
+			Type:               conditionTypeWorkbenchesV2Ready,
+			Status:             metav1.ConditionFalse,
+			Reason:             "Removed",
+			Message:            "workbenches-v2 submodule is not enabled",
+			ObservedGeneration: wb.Generation,
+		})
+
+		return
+	}
+
+	if !r.workbenchesV2ManifestsExist() {
+		meta.SetStatusCondition(&wb.Status.Conditions, metav1.Condition{
+			Type:               conditionTypeWorkbenchesV2Ready,
+			Status:             metav1.ConditionFalse,
+			Reason:             "ManifestsNotAvailable",
+			Message:            "workbenches-v2 manifests are not available in this operator build",
+			ObservedGeneration: wb.Generation,
+		})
+
+		return
+	}
+
+	meta.SetStatusCondition(&wb.Status.Conditions, metav1.Condition{
+		Type:               conditionTypeWorkbenchesV2Ready,
+		Status:             metav1.ConditionTrue,
+		Reason:             conditionReasonAvailable,
+		Message:            "workbenches-v2 submodule manifests have been provisioned",
+		ObservedGeneration: wb.Generation,
+	})
 }
 
 func (r *WorkbenchesReconciler) resolveDesiredDistribution(

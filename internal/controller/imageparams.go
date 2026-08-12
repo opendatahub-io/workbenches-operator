@@ -75,6 +75,9 @@ var imageParamMap = map[string]string{
 	"odh-pipeline-runtime-pytorch-cuda-py312-ubi9-n":               "RELATED_IMAGE_ODH_PIPELINE_RUNTIME_PYTORCH_CUDA_PY312_IMAGE",
 	"odh-pipeline-runtime-pytorch-rocm-py312-ubi9-n":               "RELATED_IMAGE_ODH_PIPELINE_RUNTIME_PYTORCH_ROCM_PY312_IMAGE",
 	"odh-pipeline-runtime-pytorch-llmcompressor-cuda-py312-ubi9-n": "RELATED_IMAGE_ODH_PIPELINE_RUNTIME_PYTORCH_LLMCOMPRESSOR_CUDA_PY312_IMAGE",
+
+	// Workbenches V2 (uncomment when workbenches-v2 manifests are available)
+	// "workbenches-v2-controller-image": "RELATED_IMAGE_WORKBENCHES_V2_CONTROLLER_IMAGE",
 }
 
 // relatedImagesFromEnv returns params-file key → image ref for every mapped

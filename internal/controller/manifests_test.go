@@ -66,7 +66,7 @@ func TestManifestGroupsForPlatform(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			groups := manifestGroupsForPlatform(tt.platformType)
+			groups := manifestGroupsForPlatform(tt.platformType, false)
 			if len(groups) != 3 {
 				t.Fatalf("expected 3 groups, got %d", len(groups))
 			}
@@ -81,6 +81,36 @@ func TestManifestGroupsForPlatform(t *testing.T) {
 
 			if groups[2] != tt.wantNotebooks {
 				t.Errorf("notebooks group = %q, want %q", groups[2], tt.wantNotebooks)
+			}
+		})
+	}
+}
+
+func TestManifestGroupsForPlatformWithWorkbenchesV2(t *testing.T) {
+	tests := []struct {
+		name         string
+		platformType string
+		wantCount    int
+		wantV2       string
+	}{
+		{"ODH with v2 enabled", platform.OpenDataHub, 4, "workbenches/workbenches-v2/base"},
+		{"RHOAI with v2 enabled", platform.SelfManagedRhoai, 4, "workbenches/workbenches-v2/base"},
+		{"ODH with v2 disabled", platform.OpenDataHub, 3, ""},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			v2Managed := tt.wantCount == 4
+			groups := manifestGroupsForPlatform(tt.platformType, v2Managed)
+
+			if len(groups) != tt.wantCount {
+				t.Fatalf("expected %d groups, got %d", tt.wantCount, len(groups))
+			}
+
+			if v2Managed {
+				if groups[3] != tt.wantV2 {
+					t.Errorf("v2 group = %q, want %q", groups[3], tt.wantV2)
+				}
 			}
 		})
 	}
@@ -1151,7 +1181,7 @@ func TestRenderRealManifests(t *testing.T) {
 		}
 
 		t.Run(name, func(t *testing.T) {
-			groups := manifestGroupsForPlatform(p)
+			groups := manifestGroupsForPlatform(p, false)
 
 			workDir := t.TempDir()
 			srcRoot := filepath.Join(basePath, "workbenches")
@@ -1207,7 +1237,7 @@ func TestComponentLabelsConsistencyInRealManifests(t *testing.T) {
 
 	for _, p := range []string{platform.OpenDataHub, platform.SelfManagedRhoai} {
 		t.Run(p, func(t *testing.T) {
-			groups := manifestGroupsForPlatform(p)
+			groups := manifestGroupsForPlatform(p, false)
 
 			workDir := t.TempDir()
 			if err := copyDir(filepath.Join(basePath, "workbenches"), filepath.Join(workDir, "workbenches")); err != nil {
