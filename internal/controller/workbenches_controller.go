@@ -64,7 +64,7 @@ const (
 	// ImageStreamsAvailable is informational only (matches ODH); it does not gate Ready.
 	conditionTypeImageStreamsAvailable = "ImageStreamsAvailable"
 	// WorkbenchesV2Ready is informational only; it does not gate Ready.
-	conditionTypeWorkbenchesV2Ready = "WorkbenchesV2Ready"
+	conditionTypeWorkbenchesV2Ready     = "WorkbenchesV2Ready"
 	conditionReasonImageStreamsNotReady = "ImageStreamsNotReady"
 	conditionReasonUnknown              = "Unknown"
 	conditionReasonAvailable            = "Available"
