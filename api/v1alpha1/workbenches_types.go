@@ -25,6 +25,9 @@ const (
 	WorkbenchesComponentName = "workbenches"
 	WorkbenchesInstanceName  = "default-" + WorkbenchesComponentName
 	WorkbenchesKind          = "Workbenches"
+
+	ManagementStateManaged = "Managed"
+	ManagementStateRemoved = "Removed"
 )
 
 // WorkbenchesV2Spec configures the workbenches-v2 submodule.
@@ -84,8 +87,8 @@ type WorkbenchesSpec struct {
 }
 
 // IsWorkbenchesV2Managed reports whether workbenches-v2 is actively managed.
-func (s WorkbenchesSpec) IsWorkbenchesV2Managed() bool {
-	return s.WorkbenchesV2 != nil && s.WorkbenchesV2.ManagementState == "Managed"
+func (s *WorkbenchesSpec) IsWorkbenchesV2Managed() bool {
+	return s.WorkbenchesV2 != nil && s.WorkbenchesV2.ManagementState == ManagementStateManaged
 }
 
 // ComponentRelease tracks release metadata for a deployed component.

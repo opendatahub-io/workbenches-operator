@@ -134,7 +134,7 @@ func (r *WorkbenchesReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 		}
 	}
 
-	if workbenches.Spec.ManagementState == "Removed" {
+	if workbenches.Spec.ManagementState == componentsv1alpha1.ManagementStateRemoved {
 		return r.reconcileRemoved(ctx, workbenches)
 	}
 
@@ -363,7 +363,7 @@ func (r *WorkbenchesReconciler) reconcileRemoved(ctx context.Context, wb *compon
 	meta.SetStatusCondition(&wb.Status.Conditions, metav1.Condition{
 		Type:               conditionTypeReady,
 		Status:             metav1.ConditionFalse,
-		Reason:             "Removed",
+		Reason:             componentsv1alpha1.ManagementStateRemoved,
 		Message:            "Workbenches component has been removed",
 		ObservedGeneration: wb.Generation,
 	})
@@ -371,7 +371,7 @@ func (r *WorkbenchesReconciler) reconcileRemoved(ctx context.Context, wb *compon
 	meta.SetStatusCondition(&wb.Status.Conditions, metav1.Condition{
 		Type:               conditionTypeProvisioningSucceeded,
 		Status:             metav1.ConditionFalse,
-		Reason:             "Removed",
+		Reason:             componentsv1alpha1.ManagementStateRemoved,
 		Message:            "Workbenches component has been removed",
 		ObservedGeneration: wb.Generation,
 	})
@@ -379,7 +379,7 @@ func (r *WorkbenchesReconciler) reconcileRemoved(ctx context.Context, wb *compon
 	meta.SetStatusCondition(&wb.Status.Conditions, metav1.Condition{
 		Type:               conditionTypeWorkbenchesV2Ready,
 		Status:             metav1.ConditionFalse,
-		Reason:             "Removed",
+		Reason:             componentsv1alpha1.ManagementStateRemoved,
 		Message:            "Workbenches component has been removed",
 		ObservedGeneration: wb.Generation,
 	})
@@ -588,7 +588,7 @@ func (r *WorkbenchesReconciler) setWorkbenchesV2Condition(wb *componentsv1alpha1
 		meta.SetStatusCondition(&wb.Status.Conditions, metav1.Condition{
 			Type:               conditionTypeWorkbenchesV2Ready,
 			Status:             metav1.ConditionFalse,
-			Reason:             "Removed",
+			Reason:             componentsv1alpha1.ManagementStateRemoved,
 			Message:            "workbenches-v2 submodule is not enabled",
 			ObservedGeneration: wb.Generation,
 		})
