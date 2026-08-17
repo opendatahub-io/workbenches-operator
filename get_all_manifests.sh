@@ -44,15 +44,18 @@ MANIFEST_DIR="${MANIFEST_DIR:-opt/manifests}"
 # ODH (upstream) Component Manifests
 declare -A ODH_COMPONENT_MANIFESTS=(
     ["workbenches/kf-notebook-controller"]="opendatahub-io:kubeflow:main:components/notebook-controller/config"
-    ["workbenches/odh-notebook-controller"]="opendatahub-io:kubeflow:main:components/odh-notebook-controller/config"
+    ["workbenches/odh-notebook-controller"]="opendatahub-io:kubeflow:main@240e7bb94f07a7e31ae311b5a19dc114dd5fa38c:components/odh-notebook-controller/config"
     ["workbenches/notebooks"]="opendatahub-io:notebooks:main:manifests"
     ["workbenches/workspaces-controller"]="opendatahub-io:workbenches:main:workspaces/controller/manifests/kustomize"
 )
 
 # RHOAI (downstream) Component Manifests
+# Note: odh-notebook-controller is sourced from opendatahub-io/kubeflow because the
+# overlays/rhoai kustomize overlay (selected by manifestGroupsForPlatform on
+# SelfManagedRhoai) lives in the upstream fork, not in red-hat-data-services/kubeflow.
 declare -A RHOAI_COMPONENT_MANIFESTS=(
     ["workbenches/kf-notebook-controller"]="red-hat-data-services:kubeflow:main:components/notebook-controller/config"
-    ["workbenches/odh-notebook-controller"]="red-hat-data-services:kubeflow:main:components/odh-notebook-controller/config"
+    ["workbenches/odh-notebook-controller"]="opendatahub-io:kubeflow:main@240e7bb94f07a7e31ae311b5a19dc114dd5fa38c:components/odh-notebook-controller/config"
     ["workbenches/notebooks"]="red-hat-data-services:notebooks:main:manifests"
     ["workbenches/workspaces-controller"]="red-hat-data-services:workbenches:main:workspaces/controller/manifests/kustomize"
 )
@@ -196,5 +199,21 @@ mkdir -p "${MANIFEST_DIR}"
 for target in "${!COMPONENT_MANIFESTS[@]}"; do
     fetch_manifests "${target}" "${COMPONENT_MANIFESTS[${target}]}"
 done
+
+# Until opendatahub-io/kubeflow#866 merges (adding overlays/rhoai upstream), write
+# the stub overlay so SelfManagedRhoai kustomize rendering does not skip odh-notebook-controller.
+if [[ "${platform_type}" == "rhoai" ]]; then
+    rhoai_overlay="${MANIFEST_DIR}/workbenches/odh-notebook-controller/overlays/rhoai"
+    if [[ ! -f "${rhoai_overlay}/kustomization.yaml" ]]; then
+        mkdir -p "${rhoai_overlay}"
+        cat > "${rhoai_overlay}/kustomization.yaml" <<'EOF'
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+- ../../base
+EOF
+        echo "  -> wrote stub overlays/rhoai (kubeflow#866 pending)"
+    fi
+fi
 
 echo "All manifests fetched successfully."
