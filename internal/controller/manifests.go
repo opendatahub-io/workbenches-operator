@@ -55,17 +55,20 @@ const (
 // manifestGroupsForPlatform returns the kustomize root paths (relative to
 // ManifestsBasePath) for the given platform type. The OpenShift overlay is
 // always used for kf-notebook-controller because the operator only runs on
-// OpenShift (both ODH and RHOAI). The notebooks overlay varies by platform.
+// OpenShift (both ODH and RHOAI). The notebooks and odh-notebook-controller
+// overlays vary by platform.
 func manifestGroupsForPlatform(platformType string, workbenchesV2Managed bool) []string {
 	notebooksOverlay := "workbenches/notebooks/odh/base"
+	odhNotebookControllerOverlay := "workbenches/odh-notebook-controller/base"
 
 	if platformType == platform.SelfManagedRhoai {
 		notebooksOverlay = "workbenches/notebooks/rhoai/base"
+		odhNotebookControllerOverlay = "workbenches/odh-notebook-controller/overlays/rhoai"
 	}
 
 	groups := []string{
 		"workbenches/kf-notebook-controller/overlays/openshift",
-		"workbenches/odh-notebook-controller/base",
+		odhNotebookControllerOverlay,
 		notebooksOverlay,
 	}
 
