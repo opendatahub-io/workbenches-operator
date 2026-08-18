@@ -1102,7 +1102,7 @@ var _ = Describe("Workbenches Controller", func() {
 		})
 
 		It("Should set WorkbenchesV2Ready=True/Available when Managed and manifests exist", func() {
-			v2Dir := filepath.Join(manifestsDir, "workbenches", "workbenches-v2", "base")
+			v2Dir := filepath.Join(manifestsDir, "workbenches", "workspaces-controller", "overlays", "gateway")
 			Expect(os.MkdirAll(v2Dir, 0o750)).To(Succeed())
 			Expect(os.WriteFile(filepath.Join(v2Dir, "kustomization.yaml"),
 				[]byte("apiVersion: kustomize.config.k8s.io/v1beta1\nkind: Kustomization\nresources: []\n"), 0o600)).To(Succeed())

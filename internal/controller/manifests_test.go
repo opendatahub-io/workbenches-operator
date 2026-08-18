@@ -93,8 +93,8 @@ func TestManifestGroupsForPlatformWithWorkbenchesV2(t *testing.T) {
 		wantCount    int
 		wantV2       string
 	}{
-		{"ODH with v2 enabled", platform.OpenDataHub, 4, "workbenches/workbenches-v2/base"},
-		{"RHOAI with v2 enabled", platform.SelfManagedRhoai, 4, "workbenches/workbenches-v2/base"},
+		{"ODH with v2 enabled", platform.OpenDataHub, 4, "workbenches/workspaces-controller/overlays/gateway"},
+		{"RHOAI with v2 enabled", platform.SelfManagedRhoai, 4, "workbenches/workspaces-controller/overlays/gateway"},
 		{"ODH with v2 disabled", platform.OpenDataHub, 3, ""},
 	}
 

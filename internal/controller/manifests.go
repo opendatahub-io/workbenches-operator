@@ -69,14 +69,14 @@ func manifestGroupsForPlatform(platformType string, workbenchesV2Managed bool) [
 	}
 
 	if workbenchesV2Managed {
-		groups = append(groups, "workbenches/workbenches-v2/base")
+		groups = append(groups, "workbenches/workspaces-controller/overlays/gateway")
 	}
 
 	return groups
 }
 
 func (r *WorkbenchesReconciler) workbenchesV2ManifestsExist() bool {
-	v2Dir := filepath.Join(r.ManifestsBasePath, "workbenches", "workbenches-v2", "base")
+	v2Dir := filepath.Join(r.ManifestsBasePath, "workbenches", "workspaces-controller", "overlays", "gateway")
 	info, err := os.Stat(v2Dir)
 
 	return err == nil && info.IsDir()
