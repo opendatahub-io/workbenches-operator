@@ -33,28 +33,6 @@ set -euo pipefail
 
 MANIFEST_DIR="${MANIFEST_DIR:-opt/manifests}"
 
-# Portable equivalent of `realpath -m` (a GNU-only flag not implemented by
-# BSD/macOS realpath). Falls back to canonicalizing the closest existing
-# ancestor and appending the remaining components even if they don't exist yet.
-resolve_path() {
-    local path="$1" out
-    if out="$(realpath -m "${path}" 2>/dev/null)"; then
-        printf '%s\n' "${out}"
-        return
-    fi
-    local remainder="" dir="${path}"
-    while [[ ! -d "${dir}" ]]; do
-        remainder="$(basename "${dir}")${remainder:+/${remainder}}"
-        dir="$(dirname "${dir}")"
-    done
-    dir="$(cd "${dir}" && pwd -P)"
-    if [[ -n "${remainder}" ]]; then
-        printf '%s/%s\n' "${dir}" "${remainder}"
-    else
-        printf '%s\n' "${dir}"
-    fi
-}
-
 # {ODH,RHOAI}_COMPONENT_MANIFESTS are lists of component repositories to fetch.
 # Format: "repo-org:repo-name:ref-name:source-folder"
 # Key is the target folder under opt/manifests/
@@ -137,10 +115,6 @@ for arg in "$@"; do
 done
 
 TMPDIR=$(mktemp -d)
-# Resolve once so jail-check comparisons below use a stable prefix — on macOS,
-# /var is itself a symlink to /private/var, which would otherwise make the
-# unresolved mktemp path and the realpath-resolved clone path diverge.
-TMPDIR="$(resolve_path "${TMPDIR}")"
 trap 'rm -rf "${TMPDIR}"' EXIT
 
 # Collision-safe directory name for a given org/repo/ref.

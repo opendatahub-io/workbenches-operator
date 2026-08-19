@@ -77,7 +77,7 @@ var imageParamMap = map[string]string{
 	"odh-pipeline-runtime-pytorch-llmcompressor-cuda-py312-ubi9-n": "RELATED_IMAGE_ODH_PIPELINE_RUNTIME_PYTORCH_LLMCOMPRESSOR_CUDA_PY312_IMAGE",
 
 	// Workspaces controller
-	"WORKBENCH_CONTROLLER_IMAGE": "RELATED_IMAGE_WORKBENCHES_CONTROLLER_IMAGE",
+	"WORKBENCH_CONTROLLER_IMAGE": "RELATED_IMAGE_ODH_WORKBENCHES_CONTROLLER_IMAGE",
 }
 
 // relatedImagesFromEnv returns params-file key → image ref for every mapped
