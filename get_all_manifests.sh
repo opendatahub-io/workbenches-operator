@@ -71,13 +71,10 @@ if ! command -v python3 >/dev/null 2>&1; then
 fi
 
 # GNU realpath -m canonicalizes paths that may not exist yet; macOS/BSD realpath lacks -m.
-# Logical normalization only (like realpath -ms): resolves . and .. but not symlinks.
+# Mirrors realpath -m: resolve existing symlinks; keep missing trailing components.
 canonicalize_path() {
     python3 -c 'import os, sys
-path = sys.argv[1]
-if not os.path.isabs(path):
-    path = os.path.join(os.getcwd(), path)
-print(os.path.normpath(path))' "$1"
+print(os.path.realpath(sys.argv[1]))' "$1"
 }
 
 # Resolve MANIFEST_DIR once so destination jail checks use a stable absolute prefix.
