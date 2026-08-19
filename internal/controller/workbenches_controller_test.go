@@ -1101,18 +1101,52 @@ var _ = Describe("Workbenches Controller", func() {
 			Expect(v2Cond.Reason).To(Equal("ManifestsNotAvailable"))
 		})
 
-		It("Should set WorkbenchesV2Ready=True/Available when Managed and manifests exist", func() {
+		It("Should set WorkbenchesV2Ready=False/Unavailable when Managed, manifests exist, "+
+			"but the workspaces-controller deployment is not found", func() {
 			v2Dir := filepath.Join(manifestsDir, "workbenches", "workspaces-controller", "overlays", "gateway")
 			Expect(os.MkdirAll(v2Dir, 0o750)).To(Succeed())
 			Expect(os.WriteFile(filepath.Join(v2Dir, "kustomization.yaml"),
 				[]byte("apiVersion: kustomize.config.k8s.io/v1beta1\nkind: Kustomization\nresources: []\n"), 0o600)).To(Succeed())
 
+			wb := createWorkbenches("Managed", "test-ns-v2-unavailable", "OpenDataHub")
+
+			DeferCleanup(func() {
+				cleanupWorkbenches(wb)
+				cleanupNamespace("test-ns-v2-unavailable")
+			})
+
+			updated := getWorkbenches(wb.Name)
+			updated.Spec.WorkbenchesV2 = &componentsv1alpha1.WorkbenchesV2Spec{ManagementState: "Managed"}
+			Expect(k8sClient.Update(ctx, updated)).To(Succeed())
+
+			_, err := reconcileWorkbenches(reconciler, wb)
+			Expect(err).NotTo(HaveOccurred())
+
+			final := getWorkbenches(wb.Name)
+			v2Cond := meta.FindStatusCondition(final.Status.Conditions, "WorkbenchesV2Ready")
+			Expect(v2Cond).NotTo(BeNil())
+			Expect(v2Cond.Status).To(Equal(metav1.ConditionFalse))
+			Expect(v2Cond.Reason).To(Equal("Unavailable"))
+		})
+
+		It("Should set WorkbenchesV2Ready=True/Available when Managed, manifests exist, "+
+			"and the workspaces-controller deployment is ready", func() {
+			v2Dir := filepath.Join(manifestsDir, "workbenches", "workspaces-controller", "overlays", "gateway")
+			Expect(os.MkdirAll(v2Dir, 0o750)).To(Succeed())
+			Expect(os.WriteFile(filepath.Join(v2Dir, "kustomization.yaml"),
+				[]byte("apiVersion: kustomize.config.k8s.io/v1beta1\nkind: Kustomization\nresources: []\n"), 0o600)).To(Succeed())
+
+			ensureNamespace(applicationsNamespace)
+
 			wb := createWorkbenches("Managed", "test-ns-v2-available", "OpenDataHub")
 
 			DeferCleanup(func() {
 				cleanupWorkbenches(wb)
+				cleanupDeployments(applicationsNamespace)
 				cleanupNamespace("test-ns-v2-available")
 			})
+
+			createDeployment(applicationsNamespace, "workspaces-controller")
 
 			updated := getWorkbenches(wb.Name)
 			updated.Spec.WorkbenchesV2 = &componentsv1alpha1.WorkbenchesV2Spec{ManagementState: "Managed"}

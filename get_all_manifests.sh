@@ -1,4 +1,18 @@
 #!/bin/bash
+# Re-exec with a newer bash if the current one lacks associative-array support
+# (added in bash 4.0). macOS ships bash 3.2 as /bin/bash, which the Makefile
+# invokes directly — look for a modern bash in common locations so this script
+# works out of the box without requiring PATH changes.
+if [[ -z "${WORKBENCHES_BASH_REEXEC:-}" ]] && (( BASH_VERSINFO[0] < 4 )); then
+    for candidate in /opt/homebrew/bin/bash /usr/local/bin/bash /usr/local/opt/bash/bin/bash; do
+        if [[ -x "${candidate}" ]] && "${candidate}" -c '(( BASH_VERSINFO[0] >= 4 ))' 2>/dev/null; then
+            WORKBENCHES_BASH_REEXEC=1 exec "${candidate}" "$0" "$@"
+        fi
+    done
+    echo "ERROR: bash >= 4.0 is required (found ${BASH_VERSION}). On macOS, run: brew install bash" >&2
+    exit 1
+fi
+
 set -euo pipefail
 
 # Workbenches module operator manifest fetching script.
@@ -18,6 +32,28 @@ set -euo pipefail
 # then copies source_path contents into opt/manifests/<target>.
 
 MANIFEST_DIR="${MANIFEST_DIR:-opt/manifests}"
+
+# Portable equivalent of `realpath -m` (a GNU-only flag not implemented by
+# BSD/macOS realpath). Falls back to canonicalizing the closest existing
+# ancestor and appending the remaining components even if they don't exist yet.
+resolve_path() {
+    local path="$1" out
+    if out="$(realpath -m "${path}" 2>/dev/null)"; then
+        printf '%s\n' "${out}"
+        return
+    fi
+    local remainder="" dir="${path}"
+    while [[ ! -d "${dir}" ]]; do
+        remainder="$(basename "${dir}")${remainder:+/${remainder}}"
+        dir="$(dirname "${dir}")"
+    done
+    dir="$(cd "${dir}" && pwd -P)"
+    if [[ -n "${remainder}" ]]; then
+        printf '%s/%s\n' "${dir}" "${remainder}"
+    else
+        printf '%s\n' "${dir}"
+    fi
+}
 
 # {ODH,RHOAI}_COMPONENT_MANIFESTS are lists of component repositories to fetch.
 # Format: "repo-org:repo-name:ref-name:source-folder"
@@ -101,6 +137,10 @@ for arg in "$@"; do
 done
 
 TMPDIR=$(mktemp -d)
+# Resolve once so jail-check comparisons below use a stable prefix — on macOS,
+# /var is itself a symlink to /private/var, which would otherwise make the
+# unresolved mktemp path and the realpath-resolved clone path diverge.
+TMPDIR="$(resolve_path "${TMPDIR}")"
 trap 'rm -rf "${TMPDIR}"' EXIT
 
 # Collision-safe directory name for a given org/repo/ref.

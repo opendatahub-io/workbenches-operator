@@ -76,6 +76,8 @@ const (
 
 	workbenchesFinalizer = "components.platform.opendatahub.io/workbenches-cleanup"
 
+	workspacesControllerDeploymentName = "workspaces-controller"
+
 	paramGatewayURL    = "gateway-url"
 	paramMLflowEnabled = "mlflow-enabled"
 	paramSectionTitle  = "section-title"
@@ -493,10 +495,10 @@ func (r *WorkbenchesReconciler) reconcileManaged(ctx context.Context, wb *compon
 		ObservedGeneration: wb.Generation,
 	})
 
-	r.setWorkbenchesV2Condition(wb)
-
 	deploymentsReady, deployMsg := r.checkDeployments(ctx, wb)
 	r.setDeploymentCondition(wb, deploymentsReady, deployMsg)
+
+	r.setWorkbenchesV2Condition(ctx, wb)
 
 	if err = r.syncImageStreamsAvailable(ctx, wb, nsName); err != nil {
 		return r.setErrorStatus(ctx, wb, "ImageStreamsStatusFailed", err)
@@ -583,7 +585,7 @@ func (r *WorkbenchesReconciler) setDeploymentCondition(wb *componentsv1alpha1.Wo
 	}
 }
 
-func (r *WorkbenchesReconciler) setWorkbenchesV2Condition(wb *componentsv1alpha1.Workbenches) {
+func (r *WorkbenchesReconciler) setWorkbenchesV2Condition(ctx context.Context, wb *componentsv1alpha1.Workbenches) {
 	if !wb.Spec.IsWorkbenchesV2Managed() {
 		meta.SetStatusCondition(&wb.Status.Conditions, metav1.Condition{
 			Type:               conditionTypeWorkbenchesV2Ready,
@@ -608,13 +610,62 @@ func (r *WorkbenchesReconciler) setWorkbenchesV2Condition(wb *componentsv1alpha1
 		return
 	}
 
+	ready, msg := r.checkWorkspacesControllerDeployment(ctx, wb)
+	if !ready {
+		meta.SetStatusCondition(&wb.Status.Conditions, metav1.Condition{
+			Type:               conditionTypeWorkbenchesV2Ready,
+			Status:             metav1.ConditionFalse,
+			Reason:             "Unavailable",
+			Message:            msg,
+			ObservedGeneration: wb.Generation,
+		})
+
+		return
+	}
+
 	meta.SetStatusCondition(&wb.Status.Conditions, metav1.Condition{
 		Type:               conditionTypeWorkbenchesV2Ready,
 		Status:             metav1.ConditionTrue,
 		Reason:             conditionReasonAvailable,
-		Message:            "workbenches-v2 submodule manifests have been provisioned",
+		Message:            "workspaces-controller deployment is available",
 		ObservedGeneration: wb.Generation,
 	})
+}
+
+// checkWorkspacesControllerDeployment reports whether the workspaces-controller
+// Deployment (rendered from the workbenches-v2 gateway overlay) exists and has
+// its desired replicas ready.
+func (r *WorkbenchesReconciler) checkWorkspacesControllerDeployment(
+	ctx context.Context,
+	wb *componentsv1alpha1.Workbenches,
+) (bool, string) {
+	l := log.FromContext(ctx)
+	nsName := r.resolveOperandNamespace(wb.Spec.Platform)
+
+	deployments := &appsv1.DeploymentList{}
+
+	err := r.List(ctx, deployments, client.InNamespace(nsName), client.MatchingLabels{
+		metadata.ComponentLabelKey: metadata.LabelTrue,
+	})
+	if err != nil {
+		l.V(1).Info("failed to list deployments for workspaces-controller", "error", err)
+
+		return false, fmt.Sprintf("failed to list deployments: %v", err)
+	}
+
+	var v2Deployments []appsv1.Deployment
+
+	for _, d := range deployments.Items {
+		if d.Name == workspacesControllerDeploymentName {
+			v2Deployments = append(v2Deployments, d)
+		}
+	}
+
+	if len(v2Deployments) == 0 {
+		return false, "workspaces-controller deployment not found"
+	}
+
+	return deploymentsAvailability(v2Deployments)
 }
 
 func (r *WorkbenchesReconciler) resolveDesiredDistribution(

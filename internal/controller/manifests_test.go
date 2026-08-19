@@ -1180,40 +1180,47 @@ func TestRenderRealManifests(t *testing.T) {
 			name = "empty"
 		}
 
-		t.Run(name, func(t *testing.T) {
-			groups := manifestGroupsForPlatform(p, false)
-
-			workDir := t.TempDir()
-			srcRoot := filepath.Join(basePath, "workbenches")
-			dstRoot := filepath.Join(workDir, "workbenches")
-
-			if err := copyDir(srcRoot, dstRoot); err != nil {
-				t.Fatalf("copyDir() failed: %v", err)
+		for _, v2Managed := range []bool{false, true} {
+			testName := name
+			if v2Managed {
+				testName += "-workbenchesV2Managed"
 			}
 
-			for _, group := range groups {
-				t.Run(filepath.Base(group), func(t *testing.T) {
-					srcDir := filepath.Join(basePath, group)
+			t.Run(testName, func(t *testing.T) {
+				groups := manifestGroupsForPlatform(p, v2Managed)
 
-					if _, statErr := os.Stat(srcDir); os.IsNotExist(statErr) {
-						t.Fatalf("manifest group directory does not exist: %s", srcDir)
-					}
+				workDir := t.TempDir()
+				srcRoot := filepath.Join(basePath, "workbenches")
+				dstRoot := filepath.Join(workDir, "workbenches")
 
-					renderDir := filepath.Join(workDir, group)
+				if err := copyDir(srcRoot, dstRoot); err != nil {
+					t.Fatalf("copyDir() failed: %v", err)
+				}
 
-					objects, err := renderKustomize(renderDir, params)
-					if err != nil {
-						t.Fatalf("renderKustomize(%s) failed: %v", group, err)
-					}
+				for _, group := range groups {
+					t.Run(filepath.Base(group), func(t *testing.T) {
+						srcDir := filepath.Join(basePath, group)
 
-					if len(objects) == 0 {
-						t.Errorf("renderKustomize(%s) produced 0 objects", group)
-					}
+						if _, statErr := os.Stat(srcDir); os.IsNotExist(statErr) {
+							t.Fatalf("manifest group directory does not exist: %s", srcDir)
+						}
 
-					t.Logf("rendered %d objects", len(objects))
-				})
-			}
-		})
+						renderDir := filepath.Join(workDir, group)
+
+						objects, err := renderKustomize(renderDir, params)
+						if err != nil {
+							t.Fatalf("renderKustomize(%s) failed: %v", group, err)
+						}
+
+						if len(objects) == 0 {
+							t.Errorf("renderKustomize(%s) produced 0 objects", group)
+						}
+
+						t.Logf("rendered %d objects", len(objects))
+					})
+				}
+			})
+		}
 	}
 }
 
