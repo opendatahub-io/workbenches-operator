@@ -59,7 +59,7 @@ const (
 // overlays vary by platform.
 func manifestGroupsForPlatform(platformType string, workbenchesV2Managed bool) []string {
 	notebooksOverlay := "workbenches/notebooks/odh/base"
-	odhNotebookControllerOverlay := "workbenches/odh-notebook-controller/base"
+	odhNotebookControllerOverlay := "workbenches/odh-notebook-controller/overlays/odh"
 
 	if platformType == platform.SelfManagedRhoai {
 		notebooksOverlay = "workbenches/notebooks/rhoai/base"

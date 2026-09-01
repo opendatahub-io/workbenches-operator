@@ -61,8 +61,8 @@ func TestManifestGroupsForPlatform(t *testing.T) {
 		wantNotebooks string
 	}{
 		{"OpenShift self-managed", platform.SelfManagedRhoai, "workbenches/odh-notebook-controller/overlays/rhoai", "workbenches/notebooks/rhoai/base"},
-		{"OpenDataHub", platform.OpenDataHub, "workbenches/odh-notebook-controller/base", "workbenches/notebooks/odh/base"},
-		{"empty platform", "", "workbenches/odh-notebook-controller/base", "workbenches/notebooks/odh/base"},
+		{"OpenDataHub", platform.OpenDataHub, "workbenches/odh-notebook-controller/overlays/odh", "workbenches/notebooks/odh/base"},
+		{"empty platform", "", "workbenches/odh-notebook-controller/overlays/odh", "workbenches/notebooks/odh/base"},
 	}
 
 	for _, tt := range tests {
