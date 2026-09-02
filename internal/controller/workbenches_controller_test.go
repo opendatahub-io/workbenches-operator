@@ -64,7 +64,8 @@ var _ = Describe("Workbenches Controller", func() {
 		for _, sub := range []string{
 			"workbenches/kf-notebook-controller/overlays/openshift",
 			"workbenches/kf-notebook-controller",
-			"workbenches/odh-notebook-controller/base",
+			"workbenches/odh-notebook-controller/overlays/odh",
+			"workbenches/odh-notebook-controller/overlays/rhoai",
 			"workbenches/notebooks/odh/base",
 			"workbenches/notebooks/rhoai/base",
 		} {

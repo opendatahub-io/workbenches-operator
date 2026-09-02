@@ -57,11 +57,12 @@ func TestManifestGroupsForPlatform(t *testing.T) {
 	tests := []struct {
 		name          string
 		platformType  string
+		wantODH       string
 		wantNotebooks string
 	}{
-		{"OpenShift self-managed", platform.SelfManagedRhoai, "workbenches/notebooks/rhoai/base"},
-		{"OpenDataHub", platform.OpenDataHub, "workbenches/notebooks/odh/base"},
-		{"empty platform", "", "workbenches/notebooks/odh/base"},
+		{"OpenShift self-managed", platform.SelfManagedRhoai, "workbenches/odh-notebook-controller/overlays/rhoai", "workbenches/notebooks/rhoai/base"},
+		{"OpenDataHub", platform.OpenDataHub, "workbenches/odh-notebook-controller/overlays/odh", "workbenches/notebooks/odh/base"},
+		{"empty platform", "", "workbenches/odh-notebook-controller/overlays/odh", "workbenches/notebooks/odh/base"},
 	}
 
 	for _, tt := range tests {
@@ -75,8 +76,8 @@ func TestManifestGroupsForPlatform(t *testing.T) {
 				t.Errorf("kf group = %q, want %q", groups[0], wantKF)
 			}
 
-			if groups[1] != "workbenches/odh-notebook-controller/base" {
-				t.Errorf("odh group = %q, want workbenches/odh-notebook-controller/base", groups[1])
+			if groups[1] != tt.wantODH {
+				t.Errorf("odh group = %q, want %q", groups[1], tt.wantODH)
 			}
 
 			if groups[2] != tt.wantNotebooks {
