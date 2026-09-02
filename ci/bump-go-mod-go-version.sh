@@ -9,10 +9,11 @@ fi
 readonly GO_RELEASES_URL="https://go.dev/dl/?mode=json&include=all"
 readonly GO_TOOLSET_IMAGE_REPO="registry.access.redhat.com/ubi9/go-toolset"
 
-go_mod_files="$(git ls-files '**/go.mod')"
+# '**/go.mod' matches nested modules only; include the repo-root go.mod too.
+go_mod_files="$(git ls-files -- 'go.mod' '**/go.mod')"
 if [[ -z "${go_mod_files}" ]]; then
-  echo "No go.mod files found."
-  exit 0
+  echo "No go.mod files found." >&2
+  exit 1
 fi
 
 go_toolset_tag_exists() {
