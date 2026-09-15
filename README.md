@@ -71,9 +71,9 @@ make manifests-fetch ODH_PLATFORM_TYPE=rhoai      # RHOAI / downstream
 
 Do not edit files under `opt/manifests/` manually. After fetching, inspect the tree, run `make test`, then commit both `get_all_manifests.sh` (if sources changed) and `opt/manifests/`.
 
-A scheduled GitHub Action ([`.github/workflows/manifest-sync.yaml`](.github/workflows/manifest-sync.yaml)) runs daily, refreshes **ODH** manifests, validates rendering with `TestRenderRealManifests`, and opens/updates a PR when content changes. See [`opt/README.md`](opt/README.md) and [`DEPENDENCIES.md`](DEPENDENCIES.md).
+A scheduled GitHub Action ([`.github/workflows/manifests-sync-main.yaml`](.github/workflows/manifests-sync-main.yaml)) runs daily against `main`, refreshes **ODH** manifests, validates rendering with `TestRenderRealManifests`, and opens/updates a PR when content changes. Pushes to `stable` and `v1.x` run [`.github/workflows/manifests-sync-stable.yaml`](.github/workflows/manifests-sync-stable.yaml), which commits fetched manifests directly (`stable` also bumps ODH `branch@sha` pins first; `v1.x` keeps tag pins). See [`opt/README.md`](opt/README.md) and [`DEPENDENCIES.md`](DEPENDENCIES.md).
 
-The sync workflow needs permission to open PRs: enable **Settings → Actions → General → Allow GitHub Actions to create and approve pull requests**, or configure a fine-grained personal access token (scoped to this repository with `contents: write` and `pull_requests: write`) as a repository secret.
+The main sync workflow needs permission to open PRs: enable **Settings → Actions → General → Allow GitHub Actions to create and approve pull requests**, or configure a fine-grained personal access token (scoped to this repository with `contents: write` and `pull_requests: write`) as a repository secret. Direct commits on `stable`/`v1.x` also require those branches to allow GitHub Actions to push (or the PAT to bypass branch protection).
 
 Override individual sources:
 
@@ -354,7 +354,7 @@ kubectl get workbenches default-workbenches
 
 ### GitHub Actions
 
-Workflows run on pushes and PRs to `main`, `stable`, and `v1.x` (except manifest-sync, which is scheduled against `main`):
+Workflows run on pushes and PRs to `main`, `stable`, and `v1.x`. Manifest sync on `main` is scheduled; on `stable`/`v1.x` it runs on push:
 
 | Workflow | Purpose |
 |----------|---------|
@@ -363,7 +363,8 @@ Workflows run on pushes and PRs to `main`, `stable`, and `v1.x` (except manifest
 | [`lint.yml`](.github/workflows/lint.yml) | golangci-lint, go vet, kube-linter, Helm lint, chart sync checks, verify-manifests, verify-generate |
 | [`e2e.yml`](.github/workflows/e2e.yml) | End-to-end tests on Kind cluster |
 | [`go-directive-updater.yaml`](.github/workflows/go-directive-updater.yaml) | Weekly Go patch version bumps |
-| [`manifest-sync.yaml`](.github/workflows/manifest-sync.yaml) | Daily upstream manifest sync PRs |
+| [`manifests-sync-main.yaml`](.github/workflows/manifests-sync-main.yaml) | Daily upstream manifest sync PRs against `main` |
+| [`manifests-sync-stable.yaml`](.github/workflows/manifests-sync-stable.yaml) | On push to `stable`/`v1.x`: commit manifests directly (SHA pin bump on `stable` only) |
 | [`sync-branches.yaml`](.github/workflows/sync-branches.yaml) | Manual/workflow_call branch sync (`main→stable`, `stable→v1.x`); excludes `opt/manifests` |
 | [`tls-lint.yml`](.github/workflows/tls-lint.yml) | TLS configuration lint with SARIF upload |
 | [`semgrep-tls.yml`](.github/workflows/semgrep-tls.yml) | Semgrep TLS compliance rules on PRs |

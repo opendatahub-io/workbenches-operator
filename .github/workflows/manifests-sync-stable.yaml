@@ -1,0 +1,150 @@
+---
+# On each push to stable or v1.x:
+#   1. bump-shas — stable only; update ODH branch@sha pins and commit
+#   2. sync-manifests — fetch opt/manifests/, validate, and commit
+#      (v1.x skips bump-shas because pins are tags, not tracking branches)
+#
+# Both jobs commit directly to the branch (no PR). Skips the workflow's own
+# chore(manifests) commits to avoid a push loop.
+# Direct push requires contents:write (GITHUB_TOKEN or MANIFEST_SYNC_PAT) and
+# branch protection that allows GitHub Actions to push.
+name: Sync upstream manifests (stable/v1.x)
+
+on:
+  push:
+    branches: [stable, v1.x]
+  workflow_dispatch:
+
+concurrency:
+  group: manifests-sync-${{ github.ref_name }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  bump-shas:
+    if: |
+      github.repository_owner == 'opendatahub-io'
+      && github.ref == 'refs/heads/stable'
+      && (
+        github.event_name != 'push'
+        || !startsWith(github.event.head_commit.message, 'chore(manifests):')
+      )
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    env:
+      BASE_BRANCH: ${{ github.ref_name }}
+      REPO: ${{ github.repository }}
+      GH_TOKEN: ${{ secrets.MANIFEST_SYNC_PAT || secrets.GITHUB_TOKEN }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7.0.1
+        with:
+          ref: ${{ github.ref_name }}
+          persist-credentials: false
+
+      - name: Validate GitHub authentication
+        run: |
+          gh auth status || {
+            echo "Authentication failed — check MANIFEST_SYNC_PAT or GITHUB_TOKEN permissions"
+            exit 1
+          }
+
+      - name: Update ODH branch@sha pins
+        run: bash ci/bump-odh-manifest-shas.sh get_all_manifests.sh
+
+      - name: Commit SHA pins
+        run: |
+          set -euo pipefail
+
+          if [ -z "$(git status --porcelain -- get_all_manifests.sh)" ]; then
+            echo "No SHA pin changes detected."
+            exit 0
+          fi
+
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add get_all_manifests.sh
+          git commit -m "chore(manifests): bump ODH tracking SHAs"
+          gh auth setup-git
+          git remote set-url origin "https://github.com/${REPO}.git"
+          git pull --rebase origin "${BASE_BRANCH}"
+          git push origin "HEAD:refs/heads/${BASE_BRANCH}"
+          echo "Committed SHA pin updates to ${BASE_BRANCH}."
+
+  sync-manifests:
+    needs: bump-shas
+    if: |
+      always()
+      && !cancelled()
+      && github.repository_owner == 'opendatahub-io'
+      && (github.ref == 'refs/heads/stable' || github.ref == 'refs/heads/v1.x')
+      && (
+        github.event_name != 'push'
+        || !startsWith(github.event.head_commit.message, 'chore(manifests):')
+      )
+      && (needs.bump-shas.result == 'success' || needs.bump-shas.result == 'skipped')
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    env:
+      BASE_BRANCH: ${{ github.ref_name }}
+      REPO: ${{ github.repository }}
+      GH_TOKEN: ${{ secrets.MANIFEST_SYNC_PAT || secrets.GITHUB_TOKEN }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7.0.1
+        with:
+          ref: ${{ github.ref_name }}
+          persist-credentials: false
+
+      - name: Validate GitHub authentication
+        run: |
+          gh auth status || {
+            echo "Authentication failed — check MANIFEST_SYNC_PAT or GITHUB_TOKEN permissions"
+            exit 1
+          }
+
+      - name: Fast-forward to SHA pin commit
+        if: needs.bump-shas.result == 'success'
+        run: |
+          set -euo pipefail
+          gh auth setup-git
+          git remote set-url origin "https://github.com/${REPO}.git"
+          git pull --ff-only origin "${BASE_BRANCH}"
+
+      - name: Fetch upstream manifests
+        env:
+          ODH_PLATFORM_TYPE: OpenDataHub
+        run: bash get_all_manifests.sh
+
+      - uses: actions/setup-go@v7
+        with:
+          check-latest: true
+          go-version-file: go.mod
+
+      - name: Validate manifest rendering
+        run: go test ./internal/controller/ -run TestRenderRealManifests -v -count=1
+
+      - name: Commit manifests
+        run: |
+          set -euo pipefail
+
+          if [ -z "$(git status --porcelain -- opt/manifests)" ]; then
+            echo "No manifest changes detected."
+            exit 0
+          fi
+
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add opt/manifests
+          git commit -m "chore(manifests): sync upstream component manifests"
+          gh auth setup-git
+          git remote set-url origin "https://github.com/${REPO}.git"
+          git pull --rebase origin "${BASE_BRANCH}"
+          git push origin "HEAD:refs/heads/${BASE_BRANCH}"
+          echo "Committed manifest sync directly to ${BASE_BRANCH}."
