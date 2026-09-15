@@ -93,9 +93,14 @@ make <tool>
 
 ## Upgrading Upstream Manifests
 
-Upstream component manifests are stored in `opt/manifests/` and committed to the repository. They are refreshed by the scheduled `.github/workflows/manifest-sync.yaml` workflow, which runs `get_all_manifests.sh` daily and opens a PR when content changes. This keeps Konflux container builds hermetic and supports airgapped deployments that cannot reach GitHub at build or runtime.
+Upstream component manifests are stored in `opt/manifests/` and committed to the repository. They are refreshed by two workflows:
 
-The manifest-sync workflow needs permission to open PRs. Enable **Settings → Actions → General → Allow GitHub Actions to create and approve pull requests**, or configure a `MANIFEST_SYNC_PAT` repository secret (PAT with `repo` scope).
+- `.github/workflows/manifests-sync-main.yaml` — daily on `main`; runs `get_all_manifests.sh` and opens a PR when content changes
+- `.github/workflows/manifests-sync-stable.yaml` — on each push to `stable` or `v1.x`; on `stable` bumps ODH `branch@sha` pins in `get_all_manifests.sh` (`ci/bump-odh-manifest-shas.sh`), then on both branches runs `get_all_manifests.sh` and commits directly. `v1.x` skips the SHA bump because operand pins are tags.
+
+This keeps Konflux container builds hermetic and supports airgapped deployments that cannot reach GitHub at build or runtime.
+
+The main sync workflow needs permission to open PRs. Enable **Settings → Actions → General → Allow GitHub Actions to create and approve pull requests**, or configure a `MANIFEST_SYNC_PAT` repository secret (PAT with `repo` scope). Direct commits to `stable`/`v1.x` also require those branches to allow GitHub Actions to push (or the PAT to bypass branch protection).
 
 Manifest sources are defined in `get_all_manifests.sh` as two maps (same pattern as
 opendatahub-operator / rhods-operator):
@@ -104,8 +109,8 @@ opendatahub-operator / rhods-operator):
 - `RHOAI_COMPONENT_MANIFESTS` — downstream `red-hat-data-services` sources
 
 `ODH_PLATFORM_TYPE` selects which map is used (`OpenDataHub` by default; `rhoai`
-selects RHOAI). Unsupported values exit with an error. Upstream CI and the daily
-manifest-sync workflow use the ODH map. Downstream
+selects RHOAI). Unsupported values exit with an error. Upstream CI and the
+manifest-sync workflows use the ODH map. Downstream
 `red-hat-data-services/workbenches-operator` fetches with `ODH_PLATFORM_TYPE=rhoai`
 so `opt/manifests/` matches the workbench entries in
 [rhods-operator](https://github.com/red-hat-data-services/rhods-operator)
@@ -115,10 +120,10 @@ prefetched manifests for that release branch.
 
 | Target | Source Repository | Branch | Source Path |
 |--------|-------------------|--------|-------------|
-| `workbenches/kf-notebook-controller` | `opendatahub-io/kubeflow` | `main` | `components/notebook-controller/config` |
-| `workbenches/odh-notebook-controller` | `opendatahub-io/kubeflow` | `main` | `components/odh-notebook-controller/config` |
-| `workbenches/notebooks` | `opendatahub-io/notebooks` | `main` | `manifests` |
-| `workbenches/workspaces-controller` | `opendatahub-io/workbenches` | `main` | `workspaces/controller/manifests/kustomize` |
+| `workbenches/kf-notebook-controller` | `opendatahub-io/kubeflow` | `stable` | `components/notebook-controller/config` |
+| `workbenches/odh-notebook-controller` | `opendatahub-io/kubeflow` | `stable` | `components/odh-notebook-controller/config` |
+| `workbenches/notebooks` | `opendatahub-io/notebooks` | `stable` | `manifests` |
+| `workbenches/workspaces-controller` | `opendatahub-io/workbenches` | `stable` | `workspaces/controller/manifests/kustomize` |
 
 Operator-owned paths under `opt/manifests/` (preserved across refresh, not fetched from upstream):
 
@@ -139,7 +144,7 @@ To pin manifests to a specific commit, update the ref field to include a SHA:
 
 ```shell
 # Format: org:repo:branch@sha:source_path
-["workbenches/kf-notebook-controller"]="opendatahub-io:kubeflow:main@abc123def:components/notebook-controller/config"
+["workbenches/kf-notebook-controller"]="opendatahub-io:kubeflow:stable@abc123def:components/notebook-controller/config"
 ```
 
 After modifying manifest sources:

@@ -41,9 +41,9 @@ internal/gvk/                   Notebook, HardwareProfile, ImageStream, Namespac
 config/                         Kustomize (base, default/OpenShift, certmanager, crd, rbac, manager, operator, webhook, samples)
 charts/operator/                Helm chart (CRD/RBAC synced from generated config/)
 opt/manifests/                  Upstream operand manifests (get_all_manifests.sh; do not hand-edit)
-ci/                             Go directive bump helper script
+ci/                             Go directive bump + ODH manifest SHA pin helpers
 hack/                           Boilerplate + Helm chart sync/verify scripts
-.github/workflows/              CI (test, build, lint, e2e, manifest-sync, sync-branches, TLS lint, Semgrep)
+.github/workflows/              CI (test, build, lint, e2e, manifests-sync-main/stable, sync-branches, TLS lint, Semgrep)
 .github/dependabot.yml          Dependabot: weekly GHA bumps + Go security updates
 semgrep.yaml                    Semgrep TLS compliance rules
 .gitleaks.toml                  Secret scanning configuration (gitleaks)
@@ -98,7 +98,7 @@ There are no `test-upgrade`, `test-handler`, or `bundle` Makefile targets.
 
 ### Manifests
 - Sources and sync process are documented in [DEPENDENCIES.md](DEPENDENCIES.md) and `opt/README.md`.
-- Do not edit files under `opt/manifests/` directly — they are overwritten by `get_all_manifests.sh` / the daily `manifest-sync` workflow.
+- Do not edit files under `opt/manifests/` directly — they are overwritten by `get_all_manifests.sh` / the manifest-sync workflows.
 - At render time the controller copies the tree, overlays `RELATED_IMAGE_*` onto existing keys in `params.env` / `params-latest.env` (`imageParamMap` in `internal/controller/imageparams.go`), then merges CR-derived params (`section-title`, `mlflow-enabled`, `gateway-url`), and applies platform-specific overlays.
 - Keep `imageParamMap` in sync when upstream manifests add/rename image keys, and with opendatahub-operator's workbenches module `relatedImages` list (see [DEPENDENCIES.md](DEPENDENCIES.md) "Upgrading Upstream Manifests").
 
@@ -148,7 +148,8 @@ GitHub Actions in `.github/workflows/`:
 - `build.yml` — binary build
 - `lint.yml` — golangci-lint, go vet, kube-linter, helm-lint, chart sync/inventory verify, **verify-manifests** and **verify-generate** (ensure generated code is committed)
 - `e2e.yml` — end-to-end tests on Kind cluster (PRs touching code/Dockerfile)
-- `manifest-sync.yaml` — daily refresh of `opt/manifests/` (opens PR)
+- `manifests-sync-main.yaml` — daily refresh of `opt/manifests/` on `main` (opens PR)
+- `manifests-sync-stable.yaml` — on push to `stable`/`v1.x`, commit manifests directly (`bump-shas` on `stable` only; `v1.x` keeps tag pins)
 - `go-directive-updater.yaml` — weekly `go` directive patch bump in `go.mod`
 - `sync-branches.yaml` — manual/workflow_call sync between branches (`main→stable`, `stable→v1.x`); excludes `opt/manifests`
 - `tls-lint.yml` — TLS configuration lint (`tls-config-lint`) with SARIF upload

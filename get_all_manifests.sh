@@ -18,7 +18,9 @@ set -euo pipefail
 # Workbenches module operator manifest fetching script.
 # Downloads manifests from component repositories into opt/manifests/.
 # Manifests are committed to the repository for hermetic container builds.
-# A scheduled GitHub Action (.github/workflows/manifest-sync.yaml) refreshes them daily.
+# A GitHub Action (.github/workflows/manifests-sync-main.yaml) refreshes them
+# daily on main (PR). .github/workflows/manifests-sync-stable.yaml refreshes
+# manifests on each push to stable/v1.x (direct commit; SHA pin bump on stable only).
 #
 # Platform selection (mirrors opendatahub-operator / rhods-operator):
 #   ODH_PLATFORM_TYPE=OpenDataHub  (default) — opendatahub-io upstream sources
@@ -26,6 +28,7 @@ set -euo pipefail
 #
 # Usage:
 #   ./get_all_manifests.sh [--workbenches/kf-notebook-controller=org:repo:branch@sha:source_path]
+#   bash ci/bump-odh-manifest-shas.sh && ./get_all_manifests.sh   # refresh ODH branch@sha pins first
 #   ODH_PLATFORM_TYPE=rhoai ./get_all_manifests.sh
 #
 # The script clones from the specified org/repo at the given branch@sha,
