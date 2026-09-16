@@ -8,8 +8,20 @@ metadata:
     build.appstudio.redhat.com/pull_request_number: '{{pull_request_number}}'
     pipelinesascode.tekton.dev/cancel-in-progress: "true"
     pipelinesascode.tekton.dev/max-keep-runs: "3"
-    pipelinesascode.tekton.dev/on-cel-expression: event == "pull_request" && target_branch
-      == "main"
+    pipelinesascode.tekton.dev/on-cel-expression: |
+      event == "pull_request" && target_branch == "main" && (
+        "cmd/***".pathChanged() ||
+        "api/***".pathChanged() ||
+        "internal/***".pathChanged() ||
+        "opt/manifests/***".pathChanged() ||
+        "charts/operator/***".pathChanged() ||
+        "Dockerfile".pathChanged() ||
+        ".dockerignore".pathChanged() ||
+        "go.mod".pathChanged() ||
+        "go.sum".pathChanged() ||
+        "get_all_manifests.sh".pathChanged() ||
+        ".tekton/odh-workbenches-operator-pull-request.yaml".pathChanged()
+      )
   creationTimestamp: null
   labels:
     appstudio.openshift.io/application: opendatahub-builds
