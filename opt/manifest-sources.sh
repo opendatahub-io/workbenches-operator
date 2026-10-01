@@ -17,7 +17,7 @@ declare -A ODH_COMPONENT_MANIFESTS=(
     ["workbenches/kf-notebook-controller"]="opendatahub-io:kubeflow:stable@35ca44587f3cd10686b69f965b14c405c25ddb77:components/notebook-controller/config"
     ["workbenches/odh-notebook-controller"]="opendatahub-io:kubeflow:stable@35ca44587f3cd10686b69f965b14c405c25ddb77:components/odh-notebook-controller/config"
     ["workbenches/notebooks"]="opendatahub-io:notebooks:stable@7b87e8f1c76ea299aa66a3e72a42a5c108666b1e:manifests"
-    ["workbenches/workspaces-controller"]="opendatahub-io:workbenches:stable@4d2beb393a7d231fb26645f370715a2519c70e7e:workspaces/controller/manifests/kustomize"
+    ["workbenches/workspaces-controller"]="opendatahub-io:workbenches:stable@4343a688db41f417fbeff2026d0feef80ae7b131:workspaces/controller/manifests/kustomize"
 )
 
 # RHOAI (downstream) Component Manifests
