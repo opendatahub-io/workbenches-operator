@@ -1,0 +1,16 @@
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: workbenches-operator-allow-ingress
+  namespace: system
+  labels:
+    app.kubernetes.io/part-of: networkpolicy
+    app.opendatahub.io/networkpolicy: 'true'
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: workbenches-operator
+  policyTypes:
+  - Ingress
+  ingress:
+  - {}
