@@ -18,6 +18,7 @@ package controller
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -46,7 +47,10 @@ import (
 )
 
 const (
-	fieldOwner                        = "workbenches-operator"
+	// FieldOwner identifies the operator's server-side apply ownership.
+	FieldOwner = "workbenches-operator"
+	// NotebookControllerConfigMap holds the projected notebook ingress assignments.
+	NotebookControllerConfigMap       = "odh-notebook-controller-config"
 	kindClusterRole                   = "ClusterRole"
 	kindDeployment                    = "Deployment"
 	kindService                       = "Service"
@@ -129,7 +133,18 @@ func (r *WorkbenchesReconciler) renderAndApply(
 	}
 
 	groups := manifestGroupsForPlatform(platformType, owner.Spec.IsWorkbenchesV2Managed())
-	desired := make(map[objectRef]struct{})
+
+	ingresses, err := json.Marshal(append([]componentsv1alpha1.Ingress{}, owner.Spec.Ingresses...))
+	if err != nil {
+		return fmt.Errorf("marshal ingresses: %w", err)
+	}
+	config := &unstructured.Unstructured{Object: map[string]any{
+		"apiVersion": "v1", "kind": "ConfigMap",
+		"metadata": map[string]any{"name": NotebookControllerConfigMap, "namespace": namespace},
+		"data":     map[string]any{"ingresses": string(ingresses)},
+	}}
+	// Apply ingress assignments first so operand controllers start with their config.
+	objects := []*unstructured.Unstructured{config}
 
 	for _, group := range groups {
 		renderDir := filepath.Join(workDir, group)
@@ -146,22 +161,28 @@ func (r *WorkbenchesReconciler) renderAndApply(
 			}
 		}
 
-		objects, err := renderKustomize(renderDir, params)
+		groupObjects, err := renderKustomize(renderDir, params)
 		if err != nil {
 			return fmt.Errorf("failed to render manifests for %s: %w", group, err)
 		}
 
-		objects = prepareRenderedObjects(objects)
+		groupObjects = prepareRenderedObjects(groupObjects)
 
-		l.Info("rendered manifests", "group", group, "count", len(objects))
+		l.Info("rendered manifests", "group", group, "count", len(groupObjects))
+		objects = append(objects, groupObjects...)
+	}
 
-		for _, obj := range objects {
-			desired[objectRefFrom(obj)] = struct{}{}
+	desired := make(map[objectRef]struct{}, len(objects))
+	for _, obj := range objects {
+		ref := objectRefFrom(obj)
+		if _, duplicate := desired[ref]; duplicate {
+			return fmt.Errorf("duplicate resource %s %s/%s", ref.gvk, ref.namespace, ref.name)
 		}
+		desired[ref] = struct{}{}
+	}
 
-		if err := r.applyObjects(ctx, owner, objects); err != nil {
-			return fmt.Errorf("failed to apply manifests for %s: %w", group, err)
-		}
+	if err := r.applyObjects(ctx, owner, objects); err != nil {
+		return fmt.Errorf("failed to apply manifests: %w", err)
 	}
 
 	if err := r.gcOrphanedResources(ctx, namespace, desired); err != nil {
@@ -427,7 +448,7 @@ func (r *WorkbenchesReconciler) applyObjects(
 		//nolint:staticcheck // client.Apply via Patch is the correct pattern for unstructured SSA
 		err := r.Patch(ctx, obj,
 			client.Apply,
-			client.FieldOwner(fieldOwner),
+			client.FieldOwner(FieldOwner),
 			client.ForceOwnership,
 		)
 		if err != nil {
