@@ -116,11 +116,20 @@ sync-branches will not copy it from the source branch.
 
 `ODH_PLATFORM_TYPE` selects which map is used (`OpenDataHub` by default; `rhoai`
 selects RHOAI). Unsupported values exit with an error. Upstream CI and the
-manifest-sync workflows use the ODH map. Downstream
-`red-hat-data-services/workbenches-operator` fetches with `ODH_PLATFORM_TYPE=rhoai`
-so `opt/manifests/` matches the workbench entries in
-[rhods-operator](https://github.com/red-hat-data-services/rhods-operator)
-prefetched manifests for that release branch.
+manifest-sync workflows use the ODH map. `make manifests-fetch ODH_PLATFORM_TYPE=rhoai`
+still fetches downstream sources locally.
+
+Downstream release branches are not refreshed by these workflows. On
+`red-hat-data-services/workbenches-operator`,
+[rhods-devops-infra](https://github.com/red-hat-data-services/rhods-devops-infra)
+writes `opt/manifests/` for each branch in that repo's `src/config/releases.yaml`
+(today `rhoai-3.6`). The job is
+`.github/workflows/workbenches-operator-processor.yaml`. It resolves operand SHAs
+with the same tracer input and `src/config/modular-manifests-map.yaml` as the
+modular operators manifest validator, then copies each controller `src` onto its
+`dest`. There is no `build/manifests-config.yaml` in this repository. The job does
+not write RHDS `main`. `opt/manifests/workbenches/workspacekinds/` is not a mapped
+dest, so that operator-owned tree is left in place. Tracked as RHOAIENG-95169.
 
 ### ODH (upstream) sources
 
