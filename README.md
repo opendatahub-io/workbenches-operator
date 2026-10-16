@@ -138,12 +138,37 @@ The Helm chart value `webhooks.tlsProvider` (`openshift`, `certmanager`, or `""`
 | `ingresses` | Optional orchestrator-projected Gateway assignments. Each entry requires `name`, `gatewayName`, and `gatewayNamespace`; `hostname` and `isDefault` are optional. Names must be unique and at most 63 characters. At most one entry can be the default. |
 | `platform` | `OpenDataHub` or `SelfManagedRhoai`. Typically projected by the orchestrator. Controls notebooks overlay and UI `section-title`. |
 | `mlflowEnabled` | Whether MLflow integration is active. Typically projected by the orchestrator. Injected as `mlflow-enabled` into operand manifests. |
+| `odhNotebookControllerProbe.timeout` | Cluster-wide timeout in seconds for existing workbench and injected kube-rbac-proxy liveness/readiness probes. Positive int32; defaults to `1` when `odhNotebookControllerProbe` is present. Omit `odhNotebookControllerProbe` to disable timeout enforcement. |
 
 Notebook-controller operands and the platform ConfigMap (`odh-workbenches-config`) always target the **resolved applications namespace**: `APPLICATIONS_NAMESPACE` (Helm `operatorNamespace` / optional `applicationsNamespace`) when set and DNS-1123 valid; otherwise the platform default (`opendatahub` for OpenDataHub, `redhat-ods-applications` for SelfManagedRhoai).
 
 Ingress assignments are forwarded as JSON in `odh-notebook-controller-config.data.ingresses` in that same namespace. The notebook controller matches the Namespace annotation `opendatahub.io/ingress-name` to an entry and uses its explicit Gateway reference. An omitted or empty list preserves its existing default Gateway fallback. The platform orchestrator must project these structured entries; the former names-only projection is insufficient.
 
 Gateway names must be DNS-1123 subdomains of at most 253 characters; Gateway namespaces must be DNS-1123 labels of at most 63 characters. A nonempty `hostname` must be a DNS-1123 subdomain of at most 253 characters (wildcards are not accepted). There is no entry-count limit. Kubernetes enforces the ConfigMap's 1 MiB data limit; if its apply fails, the previous configuration is preserved and operand groups are not applied.
+
+### Workbench probe timeout
+
+Configure the policy on the `Workbenches` CR rather than editing the runtime ConfigMap:
+
+```yaml
+spec:
+  odhNotebookControllerProbe:
+    timeout: 5
+```
+
+The operator reconciles this value into `WORKBENCH_PROBE_TIMEOUT_SECONDS` in
+`notebook-controller-setting-config` in the resolved applications namespace,
+creating the ConfigMap if the upstream manifests do not include it. Reconciliation
+restores the CR's value after direct edits to that key. Other settings in an upstream
+ConfigMap are preserved. Omitting `odhNotebookControllerProbe` removes the operator's timeout policy.
+
+This requires an ODH notebook controller image with support for the setting
+(RHOAIENG-95168). Its admission webhook applies the timeout to existing liveness
+and readiness probes on the main workbench container and injected kube-rbac-proxy
+sidecar; it does not create probes or alter startup probes. Changes take effect on
+Notebook creation or update, subject to the existing running-workbench restart gate;
+changing the policy does not itself restart running workbenches. Removing the policy
+does not revert timeout values already written into Notebook specs.
 
 ### Status
 
