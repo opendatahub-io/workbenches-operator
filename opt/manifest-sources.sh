@@ -14,9 +14,9 @@
 
 # ODH (upstream) Component Manifests
 declare -A ODH_COMPONENT_MANIFESTS=(
-    ["workbenches/kf-notebook-controller"]="opendatahub-io:kubeflow:stable@497b01ef251a930076be064702ddae8427d30681:components/notebook-controller/config"
-    ["workbenches/odh-notebook-controller"]="opendatahub-io:kubeflow:stable@497b01ef251a930076be064702ddae8427d30681:components/odh-notebook-controller/config"
-    ["workbenches/notebooks"]="opendatahub-io:notebooks:stable@7b87e8f1c76ea299aa66a3e72a42a5c108666b1e:manifests"
+    ["workbenches/kf-notebook-controller"]="opendatahub-io:kubeflow:stable@b3157f9e32a194e253f00e3d75225db711b828a1:components/notebook-controller/config"
+    ["workbenches/odh-notebook-controller"]="opendatahub-io:kubeflow:stable@b3157f9e32a194e253f00e3d75225db711b828a1:components/odh-notebook-controller/config"
+    ["workbenches/notebooks"]="opendatahub-io:notebooks:stable@98855910f8ab180f2558a444e3b5d4ece9c05047:manifests"
     ["workbenches/workspaces-controller"]="opendatahub-io:workbenches:stable@0ec0f512b84dc6b4ab0fe105a01029aef2ad4309:workspaces/controller/manifests/kustomize"
 )
 
