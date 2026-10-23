@@ -188,9 +188,10 @@ jobs:
           #########################################################################
 
           # Known files to resolve conflicts by keeping the target branch version
-          # (typically branch-specific image tags / params).
+          # (branch-specific image tags and Helm image defaults).
           FILES=(
             "charts/operator/params.env"
+            "charts/operator/values.yaml"
           )
 
           # Resolve only genuine unmerged conflicts for known files
