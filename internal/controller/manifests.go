@@ -171,6 +171,13 @@ func (r *WorkbenchesReconciler) renderAndApply(
 
 		objects = prepareRenderedObjects(objects)
 
+		if strings.HasPrefix(group, "workbenches/odh-notebook-controller/") {
+			objects, err = configureWorkbenchProbes(objects, owner.Spec.ODHNotebookControllerProbe, namespace)
+			if err != nil {
+				return fmt.Errorf("failed to configure workbench probes: %w", err)
+			}
+		}
+
 		l.Info("rendered manifests", "group", group, "count", len(objects))
 
 		for _, obj := range objects {

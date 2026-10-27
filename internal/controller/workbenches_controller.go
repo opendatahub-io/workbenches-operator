@@ -850,6 +850,10 @@ func (r *WorkbenchesReconciler) ensureGeneratedNamespace(
 }
 
 func validateSpec(spec componentsv1alpha1.WorkbenchesSpec) error {
+	if spec.ODHNotebookControllerProbe != nil && spec.ODHNotebookControllerProbe.TimeoutSeconds < 1 {
+		return fmt.Errorf("odhNotebookControllerProbe.timeoutSeconds must be at least 1 second, got %d", spec.ODHNotebookControllerProbe.TimeoutSeconds)
+	}
+
 	if spec.Platform != "" && !platform.IsValid(spec.Platform) {
 		return fmt.Errorf("unsupported platform %q, must be one of: %s, %s",
 			spec.Platform, platform.OpenDataHub, platform.SelfManagedRhoai)
