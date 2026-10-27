@@ -249,8 +249,14 @@ resources:
 			config := &corev1.ConfigMap{
 				ObjectMeta: metav1.ObjectMeta{Name: controller.NotebookControllerConfigMap, Namespace: applicationsNamespace},
 			}
-			seed := corev1apply.ConfigMap(config.Name, config.Namespace).WithData(map[string]string{"additionalIngressNames": `["alpha"]`})
+			seed := corev1apply.ConfigMap(config.Name, config.Namespace).WithData(map[string]string{
+				"additionalIngressNames": `["alpha"]`,
+			})
 			Expect(k8sClient.Apply(ctx, seed, client.FieldOwner(controller.FieldOwner), client.ForceOwnership)).To(Succeed())
+			seedContract := corev1apply.ConfigMap(config.Name, config.Namespace).WithData(map[string]string{
+				componentsv1alpha1.IngressContractConfigMapKey: `{"version":"v1","sourceGeneration":3}`,
+			})
+			Expect(k8sClient.Apply(ctx, seedContract, client.FieldOwner("external-manager"), client.ForceOwnership)).To(Succeed())
 			wantIngresses := "[]"
 			failConfig := false
 			deploymentApplies := 0
@@ -275,12 +281,17 @@ resources:
 			key := client.ObjectKey{Name: controller.NotebookControllerConfigMap, Namespace: applicationsNamespace}
 			Expect(k8sClient.Get(ctx, key, config)).To(Succeed())
 			Expect(config.Data["ingresses"]).To(Equal("[]"))
+			Expect(config.Data).NotTo(HaveKey(componentsv1alpha1.IngressContractConfigMapKey))
 			Expect(config.Data).NotTo(HaveKey("additionalIngressNames"))
 			Expect(metav1.IsControlledBy(config, wb)).To(BeTrue())
 			Expect(config.Labels).To(HaveKeyWithValue(metadata.ComponentLabelKey, metadata.LabelTrue))
 			Expect(config.Labels).To(HaveKeyWithValue(metadata.PartOfLabelKey, metadata.ComponentLabelValue))
 
 			updated := getWorkbenches(wb.Name)
+			updated.Spec.IngressContract = &componentsv1alpha1.IngressContractSpec{
+				Version:          componentsv1alpha1.IngressContractVersionV1,
+				SourceGeneration: 7,
+			}
 			updated.Spec.Ingresses = []componentsv1alpha1.Ingress{
 				{Name: "primary", GatewayName: "default-gateway", GatewayNamespace: "default-ingress", IsDefault: true},
 				{Name: "alpha", GatewayName: "team-gateway", GatewayNamespace: "team-ingress", Hostname: "team.example.com"},
@@ -294,8 +305,12 @@ resources:
 			Expect(err).NotTo(HaveOccurred())
 			Expect(k8sClient.Get(ctx, key, config)).To(Succeed())
 			Expect(config.Data["ingresses"]).To(MatchJSON(wantIngresses))
+			Expect(config.Data[componentsv1alpha1.IngressContractConfigMapKey]).To(MatchJSON(
+				`{"version":"v1","sourceGeneration":7}`,
+			))
 
 			updated = getWorkbenches(wb.Name)
+			updated.Spec.IngressContract = nil
 			updated.Spec.Ingresses = updated.Spec.Ingresses[1:]
 			updated.Spec.Ingresses[0].GatewayName = "replacement-gateway"
 			wantIngresses = `[
@@ -315,6 +330,7 @@ resources:
 			Expect(err).NotTo(HaveOccurred())
 			Expect(k8sClient.Get(ctx, key, config)).To(Succeed())
 			Expect(config.Data["ingresses"]).To(Equal("[]"))
+			Expect(config.Data).NotTo(HaveKey(componentsv1alpha1.IngressContractConfigMapKey))
 			Expect(deploymentApplies).To(Equal(4))
 
 			failConfig = true
