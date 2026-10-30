@@ -16,7 +16,7 @@
 declare -A ODH_COMPONENT_MANIFESTS=(
     ["workbenches/kf-notebook-controller"]="opendatahub-io:kubeflow:stable@a7b5c32c31600403fcbde3c1af8ee26928a9ec0e:components/notebook-controller/config"
     ["workbenches/odh-notebook-controller"]="opendatahub-io:kubeflow:stable@a7b5c32c31600403fcbde3c1af8ee26928a9ec0e:components/odh-notebook-controller/config"
-    ["workbenches/notebooks"]="opendatahub-io:notebooks:stable@1f4edf1c304d5abc34be307c6be6c4be91ab211f:manifests"
+    ["workbenches/notebooks"]="opendatahub-io:notebooks:stable@493706a5ba26f0eada01763d8b3f187efa4b72b9:manifests"
     ["workbenches/workspaces-controller"]="opendatahub-io:workbenches:stable@7fa4a2bdfb11b7975903dc1583a5815acf8267a4:workspaces/controller/manifests/kustomize"
 )
 
