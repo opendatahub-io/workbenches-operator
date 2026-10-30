@@ -22,6 +22,8 @@ FROM registry.access.redhat.com/ubi9/ubi-minimal:latest
 WORKDIR /
 COPY --from=builder /workspace/manager .
 COPY opt/manifests /opt/manifests
+RUN microdnf update -y ca-certificates && microdnf clean all
+
 USER 65532:65532
 
 ENTRYPOINT ["/manager"]
