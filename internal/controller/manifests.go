@@ -52,6 +52,7 @@ const (
 	FieldOwner = "workbenches-operator"
 	// NotebookControllerConfigMap holds the projected notebook ingress assignments.
 	NotebookControllerConfigMap       = "odh-notebook-controller-config"
+	IngressesConfigMapKey             = "ingresses"
 	kindClusterRole                   = "ClusterRole"
 	kindDeployment                    = "Deployment"
 	kindNetworkPolicy                 = "NetworkPolicy"
@@ -211,12 +212,20 @@ func (r *WorkbenchesReconciler) applyIngressConfig(
 	owner *componentsv1alpha1.Workbenches,
 	namespace string,
 ) (*unstructured.Unstructured, error) {
-	ingresses, err := json.Marshal(append([]componentsv1alpha1.Ingress{}, owner.Spec.Ingresses...))
+	// Withhold not-yet-delivered ingresses until the current contract rollout
+	// completes; see gateIngressesForRollout. A nil contract renders the spec
+	// verbatim (pre-contract behavior).
+	ingressesToApply, err := r.gateIngressesForRollout(ctx, owner, owner.Spec.Ingresses)
+	if err != nil {
+		return nil, err
+	}
+
+	ingresses, err := json.Marshal(append([]componentsv1alpha1.Ingress{}, ingressesToApply...))
 	if err != nil {
 		return nil, fmt.Errorf("marshal ingresses: %w", err)
 	}
 
-	data := map[string]any{"ingresses": string(ingresses)}
+	data := map[string]any{IngressesConfigMapKey: string(ingresses)}
 	if owner.Spec.IngressContract != nil {
 		contract, err := json.Marshal(owner.Spec.IngressContract)
 		if err != nil {

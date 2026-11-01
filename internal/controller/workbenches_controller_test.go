@@ -249,6 +249,7 @@ resources:
 			})
 			ensureNamespace(applicationsNamespace)
 			createDesiredDeployment(applicationsNamespace, testNotebookControllerDeployment)
+			createDesiredDeployment(applicationsNamespace, "kf-notebook-controller")
 			config := &corev1.ConfigMap{
 				ObjectMeta: metav1.ObjectMeta{Name: controller.NotebookControllerConfigMap, Namespace: applicationsNamespace},
 			}
@@ -299,18 +300,30 @@ resources:
 				{Name: "primary", GatewayName: "default-gateway", GatewayNamespace: "default-ingress", IsDefault: true},
 				{Name: "alpha", GatewayName: "team-gateway", GatewayNamespace: "team-ingress", Hostname: "team.example.com"},
 			}
-			wantIngresses = `[
-				{"name":"primary","gatewayName":"default-gateway","gatewayNamespace":"default-ingress","isDefault":true},
-				{"name":"alpha","gatewayName":"team-gateway","gatewayNamespace":"team-ingress","hostname":"team.example.com"}
-			]`
+			// The contract rollout is pending until both notebook controller
+			// deployments carry the new stamp, so the first reconcile withholds
+			// the undelivered ingresses from the ConfigMap.
+			wantIngresses = `[]`
 			Expect(k8sClient.Update(ctx, updated)).To(Succeed())
 			_, err = reconcileWorkbenches(reconciler, wb)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(k8sClient.Get(ctx, key, config)).To(Succeed())
-			Expect(config.Data["ingresses"]).To(MatchJSON(wantIngresses))
+			Expect(config.Data["ingresses"]).To(MatchJSON("[]"))
 			Expect(config.Data[componentsv1alpha1.IngressContractConfigMapKey]).To(MatchJSON(
 				`{"version":"v1","sourceGeneration":7}`,
 			))
+
+			// Once the rollout completes the ingresses flow to the ConfigMap.
+			wantIngresses = `[
+				{"name":"primary","gatewayName":"default-gateway","gatewayNamespace":"default-ingress","isDefault":true},
+				{"name":"alpha","gatewayName":"team-gateway","gatewayNamespace":"team-ingress","hostname":"team.example.com"}
+			]`
+			completeDeploymentRollout(applicationsNamespace, testNotebookControllerDeployment)
+			completeDeploymentRollout(applicationsNamespace, "kf-notebook-controller")
+			_, err = reconcileWorkbenches(reconciler, wb)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(k8sClient.Get(ctx, key, config)).To(Succeed())
+			Expect(config.Data["ingresses"]).To(MatchJSON(wantIngresses))
 
 			updated = getWorkbenches(wb.Name)
 			updated.Spec.IngressContract = nil
@@ -334,12 +347,12 @@ resources:
 			Expect(k8sClient.Get(ctx, key, config)).To(Succeed())
 			Expect(config.Data["ingresses"]).To(Equal("[]"))
 			Expect(config.Data).NotTo(HaveKey(componentsv1alpha1.IngressContractConfigMapKey))
-			Expect(deploymentApplies).To(Equal(4))
+			appliesBeforeFailure := deploymentApplies
 
 			failConfig = true
 			_, err = reconcileWorkbenches(reconciler, wb)
 			Expect(err).To(MatchError(ContainSubstring("ingress config apply failed")))
-			Expect(deploymentApplies).To(Equal(4), "operands must not be applied when ingress config fails")
+			Expect(deploymentApplies).To(Equal(appliesBeforeFailure), "operands must not be applied when ingress config fails")
 			Expect(k8sClient.Get(ctx, key, config)).To(Succeed())
 			Expect(config.Data["ingresses"]).To(Equal("[]"))
 		})
@@ -1585,6 +1598,68 @@ resources:
 			}
 			Expect(k8sClient.Update(ctx, updated)).To(Succeed())
 		}
+
+		setIngresses := func(wb *componentsv1alpha1.Workbenches, names ...string) {
+			updated := getWorkbenches(wb.Name)
+			updated.Spec.Ingresses = make([]componentsv1alpha1.Ingress, 0, len(names))
+			for _, name := range names {
+				updated.Spec.Ingresses = append(updated.Spec.Ingresses, componentsv1alpha1.Ingress{
+					Name: name, GatewayName: name, GatewayNamespace: applicationsNamespace, Hostname: name + ".example.com",
+				})
+			}
+			Expect(k8sClient.Update(ctx, updated)).To(Succeed())
+		}
+
+		configMapIngressNames := func() []string {
+			config := &corev1.ConfigMap{}
+			key := client.ObjectKey{Name: controller.NotebookControllerConfigMap, Namespace: applicationsNamespace}
+			ExpectWithOffset(1, k8sClient.Get(ctx, key, config)).To(Succeed())
+			ingresses := []componentsv1alpha1.Ingress{}
+			ExpectWithOffset(1, json.Unmarshal([]byte(config.Data[controller.IngressesConfigMapKey]), &ingresses)).To(Succeed())
+			names := make([]string, 0, len(ingresses))
+			for _, ingress := range ingresses {
+				names = append(names, ingress.Name)
+			}
+			return names
+		}
+
+		It("Should withhold new ingresses from the ConfigMap until the contract rollout completes", func() {
+			wb := setup("ingress-contract-configmap-gating")
+			setContract(wb, 21)
+			setIngresses(wb, "alpha", "beta")
+
+			// Rollout pending: the contract is projected but no ingress has
+			// been delivered yet, so the ConfigMap must not hand out shards
+			// the notebook controller cannot be trusted to route yet.
+			_, err := reconcileWorkbenches(reconciler, wb)
+			Expect(err).NotTo(HaveOccurred())
+			pending := getWorkbenches(wb.Name)
+			Expect(meta.FindStatusCondition(pending.Status.Conditions, "IngressContractReady").Reason).To(Equal("IngressContractRolloutPending"))
+			Expect(configMapIngressNames()).To(BeEmpty())
+
+			completeDeploymentRollout(applicationsNamespace, testNotebookControllerDeployment)
+			completeDeploymentRollout(applicationsNamespace, "kf-notebook-controller")
+			_, err = reconcileWorkbenches(reconciler, wb)
+			Expect(err).NotTo(HaveOccurred())
+			ready := getWorkbenches(wb.Name)
+			Expect(meta.FindStatusCondition(ready.Status.Conditions, "IngressContractReady").Status).To(Equal(metav1.ConditionTrue))
+			Expect(configMapIngressNames()).To(Equal([]string{"alpha", "beta"}))
+
+			// A contract change re-pends the rollout: delivered ingresses stay
+			// in the ConfigMap, new ones are withheld until the re-rollout
+			// completes.
+			setContract(wb, 22)
+			setIngresses(wb, "alpha", "gamma")
+			_, err = reconcileWorkbenches(reconciler, wb)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(configMapIngressNames()).To(Equal([]string{"alpha"}))
+
+			completeDeploymentRollout(applicationsNamespace, testNotebookControllerDeployment)
+			completeDeploymentRollout(applicationsNamespace, "kf-notebook-controller")
+			_, err = reconcileWorkbenches(reconciler, wb)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(configMapIngressNames()).To(Equal([]string{"alpha", "gamma"}))
+		})
 
 		It("Should be False/IngressContractNotProjected when no contract is set", func() {
 			wb := setup("ingress-contract-legacy")

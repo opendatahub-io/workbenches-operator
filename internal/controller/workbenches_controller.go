@@ -94,6 +94,11 @@ type WorkbenchesReconciler struct {
 	Scheme                *runtime.Scheme
 	ManifestsBasePath     string
 	ApplicationsNamespace string
+
+	// APIReader reads straight from the API server, bypassing the cache. It
+	// backs reads that must not observe stale state after this controller's
+	// own writes (deliveredIngressNames). Nil falls back to Client.
+	APIReader client.Reader
 }
 
 // +kubebuilder:rbac:groups=components.platform.opendatahub.io,resources=workbenches,verbs=get;list;watch;create;update;patch;delete

@@ -8,6 +8,7 @@ import (
 
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -263,4 +264,101 @@ func (r *WorkbenchesReconciler) ingressContractRolloutGeneration(
 	}
 
 	return rolloutGeneration, ""
+}
+
+// gateIngressesForRollout withholds ingresses that have not yet been delivered
+// to the notebook controller until the operand rollout carrying the current
+// contract completes (RHOAIENG-102011 scenario 3, consumer side). The platform
+// sets spec.ingresses and spec.ingressContract; this controller converges to
+// it, and only it knows whether the notebook-controller deployments consuming
+// the ConfigMap have rolled out the current contract stamp. New shard entries
+// are held back while the rollout is pending; entries already delivered stay
+// (so a re-rollout triggered by an unrelated contract change does not yank
+// in-use shards into IngressNotFound), and removals from the spec are always
+// honored. A nil contract disables the gate: the pre-contract behavior of
+// rendering the spec verbatim is unchanged.
+func (r *WorkbenchesReconciler) gateIngressesForRollout(
+	ctx context.Context,
+	wb *componentsv1alpha1.Workbenches,
+	desired []componentsv1alpha1.Ingress,
+) ([]componentsv1alpha1.Ingress, error) {
+	if wb.Spec.IngressContract == nil {
+		return desired, nil
+	}
+
+	if _, rolloutMsg := r.ingressContractRolloutGeneration(ctx, wb); rolloutMsg == "" {
+		return desired, nil
+	}
+
+	delivered, err := r.deliveredIngresses(ctx, wb)
+	if err != nil {
+		return nil, err
+	}
+
+	gated := make([]componentsv1alpha1.Ingress, 0, len(desired))
+	for _, ingress := range desired {
+		if record, ok := delivered[ingress.Name]; ok {
+			// Keep the delivered record, not the desired one: a spec change to
+			// a delivered shard's gateway must not reach the ConfigMap before
+			// the rollout that validates it completes.
+			gated = append(gated, record)
+			continue
+		}
+		log.FromContext(ctx).V(1).Info(
+			"withholding ingress until the current contract rollout completes",
+			"ingress", ingress.Name)
+	}
+	return gated, nil
+}
+
+// deliveredIngresses reads the ingress records currently in the notebook
+// controller ConfigMap, the artifact the notebook controller actually
+// consumes. It is the delivery truth for the gate: what is in the ConfigMap
+// has been handed out, what is not has not. The read goes through the API
+// reader when available: a cache-stale read after this controller's own apply
+// could miss a delivered ingress and yank it from the live ConfigMap during a
+// pending rollout.
+func (r *WorkbenchesReconciler) deliveredIngresses(
+	ctx context.Context,
+	wb *componentsv1alpha1.Workbenches,
+) (map[string]componentsv1alpha1.Ingress, error) {
+	delivered := map[string]componentsv1alpha1.Ingress{}
+
+	reader := r.APIReader
+	if reader == nil {
+		reader = r.Client
+	}
+
+	config := &corev1.ConfigMap{}
+	key := client.ObjectKey{Name: NotebookControllerConfigMap, Namespace: r.resolveOperandNamespace(wb.Spec.Platform)}
+	if err := reader.Get(ctx, key, config); err != nil {
+		if apierrors.IsNotFound(err) {
+			return delivered, nil
+		}
+		return nil, fmt.Errorf("failed to read %s ConfigMap: %w", NotebookControllerConfigMap, err)
+	}
+
+	raw, found := config.Data[IngressesConfigMapKey]
+	if !found {
+		return delivered, nil
+	}
+
+	var ingresses []componentsv1alpha1.Ingress
+	// Malformed data was not written by this controller's render path; treat
+	// nothing as delivered so the gate fails closed for new assignments until
+	// the ConfigMap is healed by the next apply.
+	if err := json.Unmarshal([]byte(raw), &ingresses); err != nil {
+		log.FromContext(ctx).V(1).Info("ignoring malformed ingresses data in ConfigMap", "error", err)
+		ingresses = nil
+	}
+	for _, ingress := range ingresses {
+		// Only complete records count as delivered: this controller always
+		// writes validated entries, so a name-only record is foreign data and
+		// must not satisfy the gate for a matching desired ingress.
+		if ingress.Name == "" || ingress.GatewayName == "" || ingress.GatewayNamespace == "" {
+			continue
+		}
+		delivered[ingress.Name] = ingress
+	}
+	return delivered, nil
 }

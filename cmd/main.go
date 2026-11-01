@@ -195,6 +195,7 @@ func main() {
 		Scheme:                mgr.GetScheme(),
 		ManifestsBasePath:     manifestsBasePath,
 		ApplicationsNamespace: applicationsNamespace,
+		APIReader:             mgr.GetAPIReader(),
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "Workbenches")
 		os.Exit(1)

@@ -18,7 +18,9 @@ package controller
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"slices"
 	"strings"
 	"testing"
 
@@ -538,4 +540,128 @@ func TestSetErrorStatusClearsIngressContractEvidence(t *testing.T) {
 	if wb.Status.IngressContract != (componentsv1alpha1.IngressContractStatus{}) {
 		t.Fatalf("status.ingressContract = %+v, want cleared", wb.Status.IngressContract)
 	}
+}
+
+func TestGateIngressesForRollout(t *testing.T) {
+	contract := &componentsv1alpha1.IngressContractSpec{Version: componentsv1alpha1.IngressContractVersionV1, SourceGeneration: 17}
+	expectedStamp := "v1:17"
+	ctx := context.Background()
+
+	desired := []componentsv1alpha1.Ingress{
+		{Name: "alpha", GatewayName: "alpha", GatewayNamespace: "opendatahub", Hostname: "alpha.example.com"},
+		{Name: "beta", GatewayName: "beta", GatewayNamespace: "opendatahub", Hostname: "beta.example.com"},
+	}
+
+	rolledDeployments := func(stamp string) []runtime.Object {
+		odh := rolloutGateDeploymentSpec{name: "odh-notebook-controller-manager", component: "odh-notebook-controller",
+			replicas: &replicasOne, stamp: &stamp, generation: 4, observed: 4, updated: 1, ready: 1, total: 1}
+		kf := rolloutGateDeploymentSpec{name: "kf-notebook-controller-manager", component: "kf-notebook-controller",
+			replicas: &replicasOne, stamp: &stamp, generation: 3, observed: 3, updated: 1, ready: 1, total: 1}
+		return []runtime.Object{odh.build(), kf.build()}
+	}
+
+	deliveredConfigMap := func(names ...string) *corev1.ConfigMap {
+		ingresses := make([]componentsv1alpha1.Ingress, 0, len(names))
+		for _, name := range names {
+			ingresses = append(ingresses, componentsv1alpha1.Ingress{Name: name, GatewayName: name, GatewayNamespace: "opendatahub"})
+		}
+		raw, err := json.Marshal(ingresses)
+		if err != nil {
+			t.Fatalf("marshal: %v", err)
+		}
+		return ingressContractConfigMap(map[string]string{IngressesConfigMapKey: string(raw)})
+	}
+
+	gate := func(t *testing.T, contract *componentsv1alpha1.IngressContractSpec, objects []runtime.Object) []componentsv1alpha1.Ingress {
+		t.Helper()
+		r := newIngressContractReconciler(objects...)
+		wb := ingressContractWorkbenches(contract)
+		wb.Spec.Ingresses = desired
+		gated, err := r.gateIngressesForRollout(ctx, wb, desired)
+		if err != nil {
+			t.Fatalf("gateIngressesForRollout() error = %v", err)
+		}
+		return gated
+	}
+
+	names := func(ingresses []componentsv1alpha1.Ingress) []string {
+		out := make([]string, 0, len(ingresses))
+		for _, ingress := range ingresses {
+			out = append(out, ingress.Name)
+		}
+		return out
+	}
+
+	t.Run("nil contract renders the spec verbatim", func(t *testing.T) {
+		gated := gate(t, nil, nil)
+		if len(gated) != len(desired) {
+			t.Fatalf("gated = %v, want %d entries", names(gated), len(desired))
+		}
+	})
+
+	t.Run("completed rollout renders the spec verbatim", func(t *testing.T) {
+		gated := gate(t, contract, rolledDeployments(expectedStamp))
+		if len(gated) != len(desired) {
+			t.Fatalf("gated = %v, want %d entries", names(gated), len(desired))
+		}
+	})
+
+	t.Run("pending rollout withholds undelivered ingresses and keeps delivered ones", func(t *testing.T) {
+		gated := gate(t, contract, append(rolledDeployments(staleStamp), deliveredConfigMap("alpha")))
+		if got := names(gated); !slices.Equal(got, []string{"alpha"}) {
+			t.Fatalf("gated = %v, want [alpha]", got)
+		}
+	})
+
+	t.Run("pending rollout keeps the delivered record when the spec changes a delivered gateway", func(t *testing.T) {
+		// alpha is delivered on gatewayA; the spec now points it at gatewayB.
+		// The ConfigMap must keep gatewayA until the rollout completes, so the
+		// change is not handed to the notebook controller unvalidated.
+		delivered := deliveredConfigMap("alpha")
+		delivered.Data[IngressesConfigMapKey] = `[{"name":"alpha","gatewayName":"gatewayA","gatewayNamespace":"opendatahub"}]`
+
+		wb := ingressContractWorkbenches(contract)
+		wb.Spec.Ingresses = []componentsv1alpha1.Ingress{
+			{Name: "alpha", GatewayName: "gatewayB", GatewayNamespace: "opendatahub"},
+		}
+		r := newIngressContractReconciler(append(rolledDeployments(staleStamp), delivered)...)
+		gated, err := r.gateIngressesForRollout(ctx, wb, wb.Spec.Ingresses)
+		if err != nil {
+			t.Fatalf("gateIngressesForRollout() error = %v", err)
+		}
+		if len(gated) != 1 {
+			t.Fatalf("gated = %v, want one entry", names(gated))
+		}
+		if gated[0].GatewayName != "gatewayA" {
+			t.Fatalf("gated gateway = %q, want the delivered gatewayA", gated[0].GatewayName)
+		}
+	})
+
+	t.Run("pending rollout with no ConfigMap withholds everything", func(t *testing.T) {
+		gated := gate(t, contract, rolledDeployments(staleStamp))
+		if len(gated) != 0 {
+			t.Fatalf("gated = %v, want empty", names(gated))
+		}
+	})
+
+	t.Run("pending rollout drops removed ingresses", func(t *testing.T) {
+		wb := ingressContractWorkbenches(contract)
+		wb.Spec.Ingresses = desired
+		r := newIngressContractReconciler(append(rolledDeployments(staleStamp), deliveredConfigMap("alpha", "gamma"))...)
+		gated, err := r.gateIngressesForRollout(ctx, wb, desired)
+		if err != nil {
+			t.Fatalf("gateIngressesForRollout() error = %v", err)
+		}
+		if got := names(gated); !slices.Equal(got, []string{"alpha"}) {
+			t.Fatalf("gated = %v, want [alpha] (gamma removed from spec must not survive)", got)
+		}
+	})
+
+	t.Run("malformed ConfigMap data withholds new assignments", func(t *testing.T) {
+		malformed := ingressContractConfigMap(map[string]string{IngressesConfigMapKey: `[{\"name\": `})
+		gated := gate(t, contract, append(rolledDeployments(staleStamp), malformed))
+		if len(gated) != 0 {
+			t.Fatalf("gated = %v, want empty", names(gated))
+		}
+	})
 }
