@@ -28,7 +28,6 @@ import (
 	"strings"
 
 	"github.com/go-logr/logr"
-	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -137,7 +136,7 @@ func (r *WorkbenchesReconciler) renderAndApply(
 
 	groups := manifestGroupsForPlatform(platformType, owner.Spec.IsWorkbenchesV2Managed())
 
-	config, err := r.applyIngressConfig(ctx, owner, namespace)
+	ingressesHash, config, err := r.applyIngressConfig(ctx, owner, namespace)
 	if err != nil {
 		return err
 	}
@@ -172,8 +171,8 @@ func (r *WorkbenchesReconciler) renderAndApply(
 			}
 		}
 
-		if err := stampIngressContract(objects, owner.Spec.IngressContract); err != nil {
-			return fmt.Errorf("failed to stamp ingress contract for %s: %w", group, err)
+		if err := stampIngressConfig(objects, ingressesHash); err != nil {
+			return fmt.Errorf("failed to stamp ingress config for %s: %w", group, err)
 		}
 
 		l.Info("rendered manifests", "group", group, "count", len(objects))
@@ -211,27 +210,28 @@ func (r *WorkbenchesReconciler) applyIngressConfig(
 	ctx context.Context,
 	owner *componentsv1alpha1.Workbenches,
 	namespace string,
-) (*unstructured.Unstructured, error) {
-	// Withhold not-yet-delivered ingresses until the current contract rollout
-	// completes; see gateIngressesForRollout. A nil contract renders the spec
-	// verbatim (pre-contract behavior).
-	ingressesToApply, err := r.gateIngressesForRollout(ctx, owner, owner.Spec.Ingresses)
+) (string, *unstructured.Unstructured, error) {
+	// Withhold not-yet-delivered ingresses until the rollout of the currently
+	// delivered content completes; see gateIngressesForDelivery. Delivered
+	// records are kept verbatim and removals are honored.
+	ingressesToApply, err := r.gateIngressesForDelivery(ctx, owner, owner.Spec.Ingresses)
 	if err != nil {
-		return nil, err
+		return "", nil, err
 	}
 
 	ingresses, err := json.Marshal(append([]componentsv1alpha1.Ingress{}, ingressesToApply...))
 	if err != nil {
-		return nil, fmt.Errorf("marshal ingresses: %w", err)
+		return "", nil, fmt.Errorf("marshal ingresses: %w", err)
 	}
 
-	data := map[string]any{IngressesConfigMapKey: string(ingresses)}
-	if owner.Spec.IngressContract != nil {
-		contract, err := json.Marshal(owner.Spec.IngressContract)
-		if err != nil {
-			return nil, fmt.Errorf("marshal ingress contract: %w", err)
-		}
-		data[componentsv1alpha1.IngressContractConfigMapKey] = string(contract)
+	// The hash ties the ConfigMap payload to the deployment rollout: it is
+	// what the notebook controller verifies (integrity of what it consumes)
+	// and what the pod-template stamp carries (rollout evidence).
+	hash := ingressConfigHash(string(ingresses))
+
+	data := map[string]any{
+		IngressesConfigMapKey:                        string(ingresses),
+		componentsv1alpha1.IngressesHashConfigMapKey: hash,
 	}
 
 	config := &unstructured.Unstructured{Object: map[string]any{
@@ -241,47 +241,10 @@ func (r *WorkbenchesReconciler) applyIngressConfig(
 	}}
 
 	if err := r.applyObjects(ctx, owner, []*unstructured.Unstructured{config}); err != nil {
-		return nil, fmt.Errorf("failed to apply ingress configuration: %w", err)
+		return "", nil, fmt.Errorf("failed to apply ingress configuration: %w", err)
 	}
 
-	// Clear any stale contract key only after a successful apply: if the apply
-	// fails, the previous contract state must be preserved.
-	if owner.Spec.IngressContract == nil {
-		if err := r.clearIngressContract(ctx, namespace); err != nil {
-			return nil, fmt.Errorf("failed to clear stale ingress contract: %w", err)
-		}
-	}
-
-	return config, nil
-}
-
-// clearIngressContract removes the contract key from the notebook controller
-// ConfigMap even when another field manager owns it. Server-Side Apply cannot
-// express this: omitting the key keeps foreign-owned data, and a null value is
-// coerced to "" because ConfigMap data values are typed strings.
-func (r *WorkbenchesReconciler) clearIngressContract(ctx context.Context, namespace string) error {
-	config := &corev1.ConfigMap{}
-	key := client.ObjectKey{Name: NotebookControllerConfigMap, Namespace: namespace}
-	if err := r.Get(ctx, key, config); err != nil {
-		if apierrors.IsNotFound(err) {
-			return nil
-		}
-		return fmt.Errorf("get configmap %s/%s: %w", key.Namespace, key.Name, err)
-	}
-
-	if config.Data == nil {
-		return nil
-	}
-	if _, found := config.Data[componentsv1alpha1.IngressContractConfigMapKey]; !found {
-		return nil
-	}
-
-	original := config.DeepCopy()
-	delete(config.Data, componentsv1alpha1.IngressContractConfigMapKey)
-	if err := r.Patch(ctx, config, client.MergeFrom(original)); err != nil {
-		return fmt.Errorf("patch configmap %s/%s: %w", key.Namespace, key.Name, err)
-	}
-	return nil
+	return hash, config, nil
 }
 
 // copyDir recursively copies src to dst, creating dst and all subdirectories.

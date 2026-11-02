@@ -35,10 +35,12 @@ const (
 	// workbenches behavior via opendatahub-operator's MergeDeployments.
 	ManagedAnnotation = "opendatahub.io/managed"
 
-	// IngressContractAnnotationKey is stamped on notebook controller deployment
-	// pod templates with the projected contract. It ties rollout evidence to
-	// contract content: every contract change bumps the deployment generation,
-	// and IngressContractReady only reports True once the rollout carrying the
-	// exact stamp completes.
-	IngressContractAnnotationKey = "opendatahub.io/ingress-contract"
+	// IngressConfigHashAnnotationKey is stamped on notebook controller
+	// deployment pod templates with the sha256 of the rendered ingress
+	// configuration. It ties rollout evidence to the exact content delivered:
+	// every configuration change bumps the deployment generation, and
+	// IngressConfigReady only reports True once the rollout carrying the
+	// exact content completes. Mirrors the secret-hash pattern used for the
+	// kube-auth-proxy rollouts.
+	IngressConfigHashAnnotationKey = "opendatahub.io/ingress-config-hash"
 )
