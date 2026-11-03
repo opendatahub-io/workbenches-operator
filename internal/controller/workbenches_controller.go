@@ -590,9 +590,9 @@ func (r *WorkbenchesReconciler) reconcileManaged(ctx context.Context, wb *compon
 	l.Info("reconciliation complete", "phase", wb.Status.Phase)
 
 	// Requeue while the ingress configuration delivery stays unconfirmed:
-	// transient failures reading the ConfigMap or listing deployments produce
-	// no watch event, and without this the condition could stay False until
-	// the next periodic resync.
+	// transient failures reading the ConfigMap produce no watch event, and
+	// without this the condition could stay False until the next periodic
+	// resync.
 	ingressConfigPending := !meta.IsStatusConditionTrue(wb.Status.Conditions, conditionTypeIngressConfigReady)
 
 	if !deploymentsReady ||

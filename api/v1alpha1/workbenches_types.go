@@ -169,19 +169,13 @@ type Distribution struct {
 }
 
 // IngressConfigStatus records the ingress configuration observed by the
-// module, including whether the consuming operand rollout has completed.
+// module.
 type IngressConfigStatus struct {
 	// hash is the sha256 of the ingresses payload currently delivered to the
 	// notebook controller ConfigMap.
 	// +kubebuilder:validation:MaxLength=64
 	// +kubebuilder:validation:Pattern=`^[a-f0-9]*$`
 	Hash string `json:"hash,omitempty"`
-
-	// deploymentGeneration is the highest generation among the notebook
-	// controller deployments observed to have completed rollout with the
-	// current ingress configuration.
-	// +kubebuilder:validation:Minimum=0
-	DeploymentGeneration int64 `json:"deploymentGeneration,omitempty"`
 }
 
 // WorkbenchesStatus defines the observed state of Workbenches.

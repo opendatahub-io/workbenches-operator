@@ -292,52 +292,29 @@ resources:
 				{Name: "primary", GatewayName: "default-gateway", GatewayNamespace: "default-ingress", IsDefault: true},
 				{Name: "alpha", GatewayName: "team-gateway", GatewayNamespace: "team-ingress", Hostname: "team.example.com"},
 			}
-			// The rollout of the delivered (empty) content is pending until
-			// both notebook controller deployments carry its hash, so the
-			// first reconcile withholds the undelivered ingresses.
-			wantIngresses = `[]`
-			Expect(k8sClient.Update(ctx, updated)).To(Succeed())
-			_, err = reconcileWorkbenches(reconciler, wb)
-			Expect(err).NotTo(HaveOccurred())
-			Expect(k8sClient.Get(ctx, key, config)).To(Succeed())
-			Expect(config.Data["ingresses"]).To(MatchJSON("[]"))
-			Expect(config.Data).To(HaveKey(controller.IngressesConfigMapKey))
-
-			// Once the rollout completes the ingresses flow to the ConfigMap.
+			// The consumer reads the ConfigMap dynamically, so the new
+			// ingresses are delivered on the first reconcile after the spec
+			// change, ahead of the operand applies.
 			wantIngresses = `[
 				{"name":"primary","gatewayName":"default-gateway","gatewayNamespace":"default-ingress","isDefault":true},
 				{"name":"alpha","gatewayName":"team-gateway","gatewayNamespace":"team-ingress","hostname":"team.example.com"}
 			]`
-			completeDeploymentRollout(applicationsNamespace, testNotebookControllerDeployment)
-			completeDeploymentRollout(applicationsNamespace, "kf-notebook-controller")
-			_, err = reconcileWorkbenches(reconciler, wb)
-			Expect(err).NotTo(HaveOccurred())
-			Expect(k8sClient.Get(ctx, key, config)).To(Succeed())
-			Expect(config.Data["ingresses"]).To(MatchJSON(wantIngresses))
-
-			// A spec change to a delivered shard's gateway is held back while
-			// the rollout of the delivered content is pending: the ConfigMap
-			// keeps the delivered record verbatim.
-			updated = getWorkbenches(wb.Name)
-			updated.Spec.Ingresses = updated.Spec.Ingresses[1:]
-			updated.Spec.Ingresses[0].GatewayName = "replacement-gateway"
-			wantIngresses = `[
-				{"name":"alpha","gatewayName":"team-gateway","gatewayNamespace":"team-ingress","hostname":"team.example.com"}
-			]`
 			Expect(k8sClient.Update(ctx, updated)).To(Succeed())
 			_, err = reconcileWorkbenches(reconciler, wb)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(k8sClient.Get(ctx, key, config)).To(Succeed())
-			Expect(config.Data["ingresses"]).To(MatchJSON(`[
-				{"name":"alpha","gatewayName":"team-gateway","gatewayNamespace":"team-ingress","hostname":"team.example.com"}
-			]`))
+			Expect(config.Data["ingresses"]).To(MatchJSON(wantIngresses))
+			Expect(config.Data).To(HaveKey(controller.IngressesConfigMapKey))
 
-			// After the rollout completes the change flows.
+			// A spec change to a delivered shard's gateway flows on the next
+			// reconcile: no rollout is involved.
+			updated = getWorkbenches(wb.Name)
+			updated.Spec.Ingresses = updated.Spec.Ingresses[1:]
+			updated.Spec.Ingresses[0].GatewayName = "replacement-gateway"
 			wantIngresses = `[
 				{"name":"alpha","gatewayName":"replacement-gateway","gatewayNamespace":"team-ingress","hostname":"team.example.com"}
 			]`
-			completeDeploymentRollout(applicationsNamespace, testNotebookControllerDeployment)
-			completeDeploymentRollout(applicationsNamespace, "kf-notebook-controller")
+			Expect(k8sClient.Update(ctx, updated)).To(Succeed())
 			_, err = reconcileWorkbenches(reconciler, wb)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(k8sClient.Get(ctx, key, config)).To(Succeed())
@@ -1615,77 +1592,44 @@ resources:
 			return meta.FindStatusCondition(getWorkbenches(wb.Name).Status.Conditions, "IngressConfigReady")
 		}
 
-		completeRollouts := func() {
-			completeDeploymentRollout(applicationsNamespace, testNotebookControllerDeployment)
-			completeDeploymentRollout(applicationsNamespace, "kf-notebook-controller")
-		}
-
-		It("Should deliver ingresses only after the content rollout completes", func() {
+		It("Should deliver ingresses to the ConfigMap and report Ready", func() {
 			wb := setup("ingress-config-delivery")
 			setIngresses(wb, ingress("alpha", "alpha"), ingress("beta", "beta"))
 
-			// Nothing has been delivered yet: the first reconcile writes the
-			// empty payload plus its hash and starts the rollout, and the
-			// gate withholds the ingresses.
-			result, err := reconcileWorkbenches(reconciler, wb)
-			Expect(err).NotTo(HaveOccurred())
-			Expect(result.RequeueAfter).To(Equal(30 * time.Second))
-			Expect(condition(wb).Reason).To(Equal("IngressConfigRolloutPending"))
-			Expect(configMap().Data["ingresses"]).To(MatchJSON("[]"))
-			Expect(configMap().Data).To(HaveKey(componentsv1alpha1.IngressesHashConfigMapKey))
-
-			// Once the rollout of the delivered content completes, the
-			// ingresses flow. The new content restamps the deployments, so the
-			// condition re-pends until that rollout completes too.
-			completeRollouts()
-			_, err = reconcileWorkbenches(reconciler, wb)
+			// The consumer reads the ConfigMap dynamically, so delivery is
+			// just the write: the first reconcile publishes the payload with
+			// its hash and the condition confirms it immediately.
+			_, err := reconcileWorkbenches(reconciler, wb)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(configMap().Data["ingresses"]).To(MatchJSON(`[
 				{"name":"alpha","gatewayName":"alpha","gatewayNamespace":"opendatahub","hostname":"alpha.example.com"},
 				{"name":"beta","gatewayName":"beta","gatewayNamespace":"opendatahub","hostname":"beta.example.com"}
 			]`))
-			Expect(condition(wb).Reason).To(Equal("IngressConfigRolloutPending"))
-
-			// Stable content, completed rollout: Ready with hash evidence.
-			completeRollouts()
-			_, err = reconcileWorkbenches(reconciler, wb)
-			Expect(err).NotTo(HaveOccurred())
+			Expect(configMap().Data).To(HaveKey(componentsv1alpha1.IngressesHashConfigMapKey))
 			Expect(condition(wb).Status).To(Equal(metav1.ConditionTrue))
+			Expect(condition(wb).Reason).To(Equal("IngressConfigReady"))
 			Expect(getWorkbenches(wb.Name).Status.IngressConfig.Hash).NotTo(BeEmpty())
-			Expect(getWorkbenches(wb.Name).Status.IngressConfig.DeploymentGeneration).To(BeNumerically(">=", 1))
 		})
 
-		It("Should keep delivered records verbatim and withhold new ones during a pending rollout", func() {
+		It("Should apply spec changes immediately", func() {
 			wb := setup("ingress-config-churn")
 			setIngresses(wb, ingress("alpha", "gateway-a"))
 
 			_, err := reconcileWorkbenches(reconciler, wb)
 			Expect(err).NotTo(HaveOccurred())
-			completeRollouts()
-			_, err = reconcileWorkbenches(reconciler, wb)
-			Expect(err).NotTo(HaveOccurred())
-			Expect(configMap().Data["ingresses"]).To(MatchJSON(`[
-				{"name":"alpha","gatewayName":"gateway-a","gatewayNamespace":"opendatahub","hostname":"alpha.example.com"}
-			]`))
+			Expect(condition(wb).Status).To(Equal(metav1.ConditionTrue))
 
-			// Change the delivered shard's gateway and add a new one: while
-			// the rollout of the delivered content is pending, the delivered
-			// record survives verbatim and the new one is withheld.
+			// Change the delivered shard's gateway and add a new one: no
+			// rollout is involved, the next reconcile publishes the new
+			// content directly.
 			setIngresses(wb, ingress("alpha", "gateway-b"), ingress("gamma", "gamma"))
-			_, err = reconcileWorkbenches(reconciler, wb)
-			Expect(err).NotTo(HaveOccurred())
-			Expect(configMap().Data["ingresses"]).To(MatchJSON(`[
-				{"name":"alpha","gatewayName":"gateway-a","gatewayNamespace":"opendatahub","hostname":"alpha.example.com"}
-			]`))
-
-			// After the rollout completes the change flows.
-			completeRollouts()
 			_, err = reconcileWorkbenches(reconciler, wb)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(configMap().Data["ingresses"]).To(MatchJSON(`[
 				{"name":"alpha","gatewayName":"gateway-b","gatewayNamespace":"opendatahub","hostname":"alpha.example.com"},
 				{"name":"gamma","gatewayName":"gamma","gatewayNamespace":"opendatahub","hostname":"gamma.example.com"}
 			]`))
+			Expect(condition(wb).Status).To(Equal(metav1.ConditionTrue))
 		})
 
 		It("Should heal a corrupted hash key and keep reporting Ready", func() {
@@ -1694,17 +1638,11 @@ resources:
 
 			_, err := reconcileWorkbenches(reconciler, wb)
 			Expect(err).NotTo(HaveOccurred())
-			completeRollouts()
-			_, err = reconcileWorkbenches(reconciler, wb)
-			Expect(err).NotTo(HaveOccurred())
-			completeRollouts()
-			_, err = reconcileWorkbenches(reconciler, wb)
-			Expect(err).NotTo(HaveOccurred())
 			Expect(condition(wb).Status).To(Equal(metav1.ConditionTrue))
 
-			// Corrupt the hash under a foreign field manager: the rollout
-			// state no longer matches, the gate holds, and the next apply
-			// heals the hash.
+			// Corrupt the hash under a foreign field manager: the delivered
+			// evidence no longer matches the spec, and the next apply heals
+			// the hash.
 			config := configMap()
 			corrupt := corev1apply.ConfigMap(config.Name, config.Namespace).WithData(map[string]string{
 				componentsv1alpha1.IngressesHashConfigMapKey: "deadbeef",
@@ -1718,6 +1656,7 @@ resources:
 			Expect(healed.Data["ingresses"]).To(MatchJSON(`[
 				{"name":"alpha","gatewayName":"alpha","gatewayNamespace":"opendatahub","hostname":"alpha.example.com"}
 			]`))
+			Expect(condition(wb).Status).To(Equal(metav1.ConditionTrue))
 		})
 
 		It("Should be False/Removed with cleared status when managementState is Removed", func() {
@@ -1875,25 +1814,6 @@ func updateDeploymentReplicas(namespace string, specReplicas, readyReplicas int3
 	deploy.Status.ReadyReplicas = readyReplicas
 	deploy.Status.Replicas = specReplicas
 	deploy.Status.AvailableReplicas = readyReplicas
-	ExpectWithOffset(1, k8sClient.Status().Update(ctx, deploy)).To(Succeed())
-}
-
-// completeDeploymentRollout marks the deployment rollout as complete: the
-// controller has observed the current generation and all replicas are updated
-// and ready.
-func completeDeploymentRollout(namespace, name string) {
-	deploy := &appsv1.Deployment{}
-	ExpectWithOffset(1, k8sClient.Get(ctx, client.ObjectKey{Namespace: namespace, Name: name}, deploy)).To(Succeed())
-
-	deploy.Status.ObservedGeneration = deploy.Generation
-	desired := int32(1)
-	if deploy.Spec.Replicas != nil {
-		desired = *deploy.Spec.Replicas
-	}
-	deploy.Status.Replicas = desired
-	deploy.Status.UpdatedReplicas = desired
-	deploy.Status.AvailableReplicas = desired
-	deploy.Status.ReadyReplicas = desired
 	ExpectWithOffset(1, k8sClient.Status().Update(ctx, deploy)).To(Succeed())
 }
 

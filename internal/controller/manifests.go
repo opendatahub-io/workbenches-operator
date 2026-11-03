@@ -136,7 +136,7 @@ func (r *WorkbenchesReconciler) renderAndApply(
 
 	groups := manifestGroupsForPlatform(platformType, owner.Spec.IsWorkbenchesV2Managed())
 
-	ingressesHash, config, err := r.applyIngressConfig(ctx, owner, namespace)
+	config, err := r.applyIngressConfig(ctx, owner, namespace)
 	if err != nil {
 		return err
 	}
@@ -171,10 +171,6 @@ func (r *WorkbenchesReconciler) renderAndApply(
 			}
 		}
 
-		if err := stampIngressConfig(objects, ingressesHash); err != nil {
-			return fmt.Errorf("failed to stamp ingress config for %s: %w", group, err)
-		}
-
 		l.Info("rendered manifests", "group", group, "count", len(objects))
 
 		for _, obj := range objects {
@@ -199,7 +195,9 @@ func (r *WorkbenchesReconciler) renderAndApply(
 
 // applyIngressConfig builds and applies the notebook controller ingress
 // ConfigMap, returning it for desired-set tracking. Ingress assignments are
-// applied first so operand controllers start with their config.
+// applied first so operand controllers start with their config. The consumer
+// reads the ConfigMap dynamically on each reconciliation, so no operand
+// rollout is involved in delivery.
 //
 // Stale contract data is cleared after the apply: omitting the key from the
 // SSA would not remove a value owned by another field manager, and ConfigMap
@@ -210,23 +208,15 @@ func (r *WorkbenchesReconciler) applyIngressConfig(
 	ctx context.Context,
 	owner *componentsv1alpha1.Workbenches,
 	namespace string,
-) (string, *unstructured.Unstructured, error) {
-	// Withhold not-yet-delivered ingresses until the rollout of the currently
-	// delivered content completes; see gateIngressesForDelivery. Delivered
-	// records are kept verbatim and removals are honored.
-	ingressesToApply, err := r.gateIngressesForDelivery(ctx, owner, owner.Spec.Ingresses)
+) (*unstructured.Unstructured, error) {
+	ingresses, err := json.Marshal(append([]componentsv1alpha1.Ingress{}, owner.Spec.Ingresses...))
 	if err != nil {
-		return "", nil, err
+		return nil, fmt.Errorf("marshal ingresses: %w", err)
 	}
 
-	ingresses, err := json.Marshal(append([]componentsv1alpha1.Ingress{}, ingressesToApply...))
-	if err != nil {
-		return "", nil, fmt.Errorf("marshal ingresses: %w", err)
-	}
-
-	// The hash ties the ConfigMap payload to the deployment rollout: it is
-	// what the notebook controller verifies (integrity of what it consumes)
-	// and what the pod-template stamp carries (rollout evidence).
+	// The hash sits next to the payload for the consumer to verify the
+	// integrity of what it reads (see the notebook controller's checksum
+	// verification).
 	hash := ingressConfigHash(string(ingresses))
 
 	data := map[string]any{
@@ -241,10 +231,10 @@ func (r *WorkbenchesReconciler) applyIngressConfig(
 	}}
 
 	if err := r.applyObjects(ctx, owner, []*unstructured.Unstructured{config}); err != nil {
-		return "", nil, fmt.Errorf("failed to apply ingress configuration: %w", err)
+		return nil, fmt.Errorf("failed to apply ingress configuration: %w", err)
 	}
 
-	return hash, config, nil
+	return config, nil
 }
 
 // copyDir recursively copies src to dst, creating dst and all subdirectories.

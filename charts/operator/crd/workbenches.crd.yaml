@@ -280,14 +280,6 @@ spec:
                   ingressConfig records the observed ingress configuration and rollout
                   evidence.
                 properties:
-                  deploymentGeneration:
-                    description: |-
-                      deploymentGeneration is the highest generation among the notebook
-                      controller deployments observed to have completed rollout with the
-                      current ingress configuration.
-                    format: int64
-                    minimum: 0
-                    type: integer
                   hash:
                     description: |-
                       hash is the sha256 of the ingresses payload currently delivered to the
