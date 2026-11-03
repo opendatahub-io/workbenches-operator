@@ -65,11 +65,7 @@ const (
 	// ImageStreamsAvailable is informational only (matches ODH); it does not gate Ready.
 	conditionTypeImageStreamsAvailable = "ImageStreamsAvailable"
 	// WorkbenchesV2Ready is informational only; it does not gate Ready.
-	conditionTypeWorkbenchesV2Ready = "WorkbenchesV2Ready"
-	// IngressConfigReady reports delivery evidence: whether the notebook
-	// controller operands have rolled out the ingress configuration currently
-	// delivered in the ConfigMap; it does not gate Ready.
-	conditionTypeIngressConfigReady     = "IngressConfigReady"
+	conditionTypeWorkbenchesV2Ready     = "WorkbenchesV2Ready"
 	conditionReasonImageStreamsNotReady = "ImageStreamsNotReady"
 	conditionReasonUnknown              = "Unknown"
 	conditionReasonAvailable            = "Available"
@@ -95,11 +91,6 @@ type WorkbenchesReconciler struct {
 	Scheme                *runtime.Scheme
 	ManifestsBasePath     string
 	ApplicationsNamespace string
-
-	// APIReader reads straight from the API server, bypassing the cache. It
-	// backs reads that must not observe stale state after this controller's
-	// own writes (deliveredIngressNames). Nil falls back to Client.
-	APIReader client.Reader
 }
 
 // +kubebuilder:rbac:groups=components.platform.opendatahub.io,resources=workbenches,verbs=get;list;watch;create;update;patch;delete
@@ -318,7 +309,7 @@ func (deploymentAvailabilityChangedPredicate) Update(e event.UpdateEvent) bool {
 	oldDesired := deploymentDesiredReplicas(oldDeploy)
 	newDesired := deploymentDesiredReplicas(newDeploy)
 
-	// IngressConfigReady evaluates ObservedGeneration, UpdatedReplicas and
+	// Rollout evidence evaluates ObservedGeneration, UpdatedReplicas and
 	// total Replicas in addition to availability, so those transitions must
 	// also requeue (e.g. the final rollout update that only bumps
 	// ObservedGeneration).
@@ -408,18 +399,9 @@ func (r *WorkbenchesReconciler) reconcileRemoved(ctx context.Context, wb *compon
 		ObservedGeneration: wb.Generation,
 	})
 
-	meta.SetStatusCondition(&wb.Status.Conditions, metav1.Condition{
-		Type:               conditionTypeIngressConfigReady,
-		Status:             metav1.ConditionFalse,
-		Reason:             componentsv1alpha1.ManagementStateRemoved,
-		Message:            "Workbenches component has been removed",
-		ObservedGeneration: wb.Generation,
-	})
-
 	wb.Status.Phase = statusutil.ComputePhase(statusutil.PhaseContext{Removed: true})
 	wb.Status.Releases = nil
 	wb.Status.Distribution = componentsv1alpha1.Distribution{}
-	wb.Status.IngressConfig = componentsv1alpha1.IngressConfigStatus{}
 	wb.Status.ObservedGeneration = wb.Generation
 
 	sanitizeConditions(wb.Status.Conditions)
@@ -529,8 +511,6 @@ func (r *WorkbenchesReconciler) reconcileManaged(ctx context.Context, wb *compon
 	deploymentsReady, deployMsg := r.checkDeployments(ctx, wb)
 	r.setDeploymentCondition(wb, deploymentsReady, deployMsg)
 
-	r.syncIngressConfigStatus(ctx, wb)
-
 	r.setWorkbenchesV2Condition(ctx, wb)
 
 	if err = r.syncImageStreamsAvailable(ctx, wb, nsName); err != nil {
@@ -589,14 +569,7 @@ func (r *WorkbenchesReconciler) reconcileManaged(ctx context.Context, wb *compon
 
 	l.Info("reconciliation complete", "phase", wb.Status.Phase)
 
-	// Requeue while the ingress configuration delivery stays unconfirmed:
-	// transient failures reading the ConfigMap produce no watch event, and
-	// without this the condition could stay False until the next periodic
-	// resync.
-	ingressConfigPending := !meta.IsStatusConditionTrue(wb.Status.Conditions, conditionTypeIngressConfigReady)
-
 	if !deploymentsReady ||
-		ingressConfigPending ||
 		!platformconfig.DistributionAligned(desiredDistribution, wb.Status.Distribution) ||
 		(handshakeRequired && !platformconfig.HandshakeComplete(platformVersion, wb.Status.Releases)) {
 		return ctrl.Result{RequeueAfter: requeueDelay}, nil
@@ -981,18 +954,6 @@ func (r *WorkbenchesReconciler) setErrorStatus(
 
 	wb.Status.Phase = statusutil.ComputePhase(statusutil.PhaseContext{Failed: true})
 	wb.Status.ObservedGeneration = wb.Generation
-
-	// The reconcile failed before the ingress config evidence could be
-	// refreshed: withdraw it so the delivery evidence fails closed instead of
-	// trusting state from a previous generation.
-	wb.Status.IngressConfig = componentsv1alpha1.IngressConfigStatus{}
-	meta.SetStatusCondition(&wb.Status.Conditions, metav1.Condition{
-		Type:               conditionTypeIngressConfigReady,
-		Status:             metav1.ConditionFalse,
-		Reason:             "IngressConfigEvidenceStale",
-		Message:            reconcileErr.Error(),
-		ObservedGeneration: wb.Generation,
-	})
 
 	sanitizeConditions(wb.Status.Conditions)
 

@@ -18,6 +18,8 @@ package controller
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -191,6 +193,14 @@ func (r *WorkbenchesReconciler) renderAndApply(
 	}
 
 	return nil
+}
+
+// ingressConfigHash returns the sha256 of the rendered ingresses payload,
+// hex encoded. It is written to the notebook controller ConfigMap next to
+// the payload so the consumer can verify the integrity of what it reads.
+func ingressConfigHash(payload string) string {
+	sum := sha256.Sum256([]byte(payload))
+	return hex.EncodeToString(sum[:])
 }
 
 // applyIngressConfig builds and applies the notebook controller ingress

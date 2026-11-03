@@ -275,19 +275,6 @@ spec:
                     maxLength: 64
                     type: string
                 type: object
-              ingressConfig:
-                description: |-
-                  ingressConfig records the observed ingress configuration and rollout
-                  evidence.
-                properties:
-                  hash:
-                    description: |-
-                      hash is the sha256 of the ingresses payload currently delivered to the
-                      notebook controller ConfigMap.
-                    maxLength: 64
-                    pattern: ^[a-f0-9]*$
-                    type: string
-                type: object
               observedGeneration:
                 description: observedGeneration is the most recent generation observed
                   by the controller.

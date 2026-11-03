@@ -168,16 +168,6 @@ type Distribution struct {
 	Version string `json:"version,omitempty"`
 }
 
-// IngressConfigStatus records the ingress configuration observed by the
-// module.
-type IngressConfigStatus struct {
-	// hash is the sha256 of the ingresses payload currently delivered to the
-	// notebook controller ConfigMap.
-	// +kubebuilder:validation:MaxLength=64
-	// +kubebuilder:validation:Pattern=`^[a-f0-9]*$`
-	Hash string `json:"hash,omitempty"`
-}
-
 // WorkbenchesStatus defines the observed state of Workbenches.
 type WorkbenchesStatus struct {
 	// conditions represent the latest available observations of the component's state.
@@ -213,10 +203,6 @@ type WorkbenchesStatus struct {
 	// notebooks namespace). It is not the operand deploy target; see
 	// status.applicationsNamespace.
 	WorkbenchNamespace string `json:"workbenchNamespace,omitempty"`
-
-	// ingressConfig records the observed ingress configuration and rollout
-	// evidence.
-	IngressConfig IngressConfigStatus `json:"ingressConfig,omitempty"`
 }
 
 // +kubebuilder:object:root=true
