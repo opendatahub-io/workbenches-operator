@@ -454,12 +454,12 @@ func TestGateIngressesForDelivery(t *testing.T) {
 			IngressesConfigMapKey:                        raw,
 			componentsv1alpha1.IngressesHashConfigMapKey: "corrupted",
 		})
-		desired := []componentsv1alpha1.Ingress{
+		opaqueNameDesired := []componentsv1alpha1.Ingress{
 			{Name: "Team_A", GatewayName: "team-a", GatewayNamespace: "opendatahub"},
 		}
-		wb := ingressConfigWorkbenches()
+		opaqueNameWb := ingressConfigWorkbenches()
 		r := newIngressConfigReconciler(append(rolledDeployments("deadbeef"), records)...)
-		gated, err := r.gateIngressesForDelivery(ctx, wb, desired)
+		gated, err := r.gateIngressesForDelivery(ctx, opaqueNameWb, opaqueNameDesired)
 		if err != nil {
 			t.Fatalf("gateIngressesForDelivery() error = %v", err)
 		}
