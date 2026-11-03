@@ -52,8 +52,12 @@ const (
 	// FieldOwner identifies the operator's server-side apply ownership.
 	FieldOwner = "workbenches-operator"
 	// NotebookControllerConfigMap holds the projected notebook ingress assignments.
-	NotebookControllerConfigMap       = "odh-notebook-controller-config"
-	IngressesConfigMapKey             = "ingresses"
+	NotebookControllerConfigMap = "odh-notebook-controller-config"
+	IngressesConfigMapKey       = "ingresses"
+	// IngressesHashConfigMapKey carries the sha256 hash of the ingresses
+	// payload, written at render time so the notebook controller can verify
+	// the integrity of what it consumes.
+	IngressesHashConfigMapKey         = "ingressesHash"
 	kindClusterRole                   = "ClusterRole"
 	kindDeployment                    = "Deployment"
 	kindNetworkPolicy                 = "NetworkPolicy"
@@ -230,8 +234,8 @@ func (r *WorkbenchesReconciler) applyIngressConfig(
 	hash := ingressConfigHash(string(ingresses))
 
 	data := map[string]any{
-		IngressesConfigMapKey:                        string(ingresses),
-		componentsv1alpha1.IngressesHashConfigMapKey: hash,
+		IngressesConfigMapKey:     string(ingresses),
+		IngressesHashConfigMapKey: hash,
 	}
 
 	config := &unstructured.Unstructured{Object: map[string]any{

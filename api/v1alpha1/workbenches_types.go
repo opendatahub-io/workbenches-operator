@@ -28,11 +28,6 @@ const (
 
 	ManagementStateManaged = "Managed"
 	ManagementStateRemoved = "Removed"
-
-	// IngressesHashConfigMapKey carries the sha256 hash of the ingresses
-	// payload, written by this controller at render time so the notebook
-	// controller can verify the integrity of what it consumes.
-	IngressesHashConfigMapKey = "ingressesHash"
 )
 
 // WorkbenchesV2Spec configures the workbenches-v2 submodule.
