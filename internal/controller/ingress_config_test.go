@@ -445,6 +445,29 @@ func TestGateIngressesForDelivery(t *testing.T) {
 		}
 	})
 
+	t.Run("non-DNS ingress names are valid and retained", func(t *testing.T) {
+		// Ingress.Name is opaque (CRD: length only): a delivered record with
+		// a name like Team_A must count as delivered, or the gate would yank
+		// it mid-rollout and flip the payload hash in a loop.
+		raw := `[{"name":"Team_A","gatewayName":"team-a","gatewayNamespace":"opendatahub"}]`
+		records := ingressConfigConfigMap(map[string]string{
+			IngressesConfigMapKey:                        raw,
+			componentsv1alpha1.IngressesHashConfigMapKey: "corrupted",
+		})
+		desired := []componentsv1alpha1.Ingress{
+			{Name: "Team_A", GatewayName: "team-a", GatewayNamespace: "opendatahub"},
+		}
+		wb := ingressConfigWorkbenches()
+		r := newIngressConfigReconciler(append(rolledDeployments("deadbeef"), records)...)
+		gated, err := r.gateIngressesForDelivery(ctx, wb, desired)
+		if err != nil {
+			t.Fatalf("gateIngressesForDelivery() error = %v", err)
+		}
+		if len(gated) != 1 || gated[0].Name != "Team_A" {
+			t.Fatalf("gated = %v, want [Team_A] retained", gated)
+		}
+	})
+
 	t.Run("incomplete or schema-invalid delivered records do not satisfy the gate", func(t *testing.T) {
 		raw := `[{"name":"alpha"},` +
 			`{"name":"beta","gatewayName":"beta","gatewayNamespace":"opendatahub"},` +

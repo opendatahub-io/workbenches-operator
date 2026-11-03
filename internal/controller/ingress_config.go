@@ -230,7 +230,11 @@ var (
 // (see the Ingress type in api/v1alpha1) for records read back from the
 // ConfigMap.
 func validIngressRecord(ingress componentsv1alpha1.Ingress) bool {
-	return len(ingress.Name) >= 1 && len(ingress.Name) <= 63 && dnsLabelPattern.MatchString(ingress.Name) &&
+	// Ingress.Name is an opaque string matched against the namespace
+	// annotation: the CRD constrains it by length only. Applying a DNS-label
+	// pattern here would reject legal delivered names mid-rollout and yank
+	// in-use shards into a hash-flip restart loop.
+	return len(ingress.Name) >= 1 && len(ingress.Name) <= 63 &&
 		len(ingress.GatewayName) >= 1 && len(ingress.GatewayName) <= 253 && dnsNamePattern.MatchString(ingress.GatewayName) &&
 		len(ingress.GatewayNamespace) >= 1 && len(ingress.GatewayNamespace) <= 63 && dnsLabelPattern.MatchString(ingress.GatewayNamespace) &&
 		len(ingress.Hostname) <= 253 && hostnamePattern.MatchString(ingress.Hostname)
