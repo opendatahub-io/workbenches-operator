@@ -281,7 +281,6 @@ resources:
 			key := client.ObjectKey{Name: controller.NotebookControllerConfigMap, Namespace: applicationsNamespace}
 			Expect(k8sClient.Get(ctx, key, config)).To(Succeed())
 			Expect(config.Data["ingresses"]).To(Equal("[]"))
-			Expect(config.Data).To(HaveKey(controller.IngressesHashConfigMapKey))
 			Expect(config.Data).NotTo(HaveKey("additionalIngressNames"))
 			Expect(metav1.IsControlledBy(config, wb)).To(BeTrue())
 			Expect(config.Labels).To(HaveKeyWithValue(metadata.ComponentLabelKey, metadata.LabelTrue))

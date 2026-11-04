@@ -18,8 +18,6 @@ package controller
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -52,12 +50,8 @@ const (
 	// FieldOwner identifies the operator's server-side apply ownership.
 	FieldOwner = "workbenches-operator"
 	// NotebookControllerConfigMap holds the projected notebook ingress assignments.
-	NotebookControllerConfigMap = "odh-notebook-controller-config"
-	IngressesConfigMapKey       = "ingresses"
-	// IngressesHashConfigMapKey carries the sha256 hash of the ingresses
-	// payload, written at render time so the notebook controller can verify
-	// the integrity of what it consumes.
-	IngressesHashConfigMapKey         = "ingressesHash"
+	NotebookControllerConfigMap       = "odh-notebook-controller-config"
+	IngressesConfigMapKey             = "ingresses"
 	kindClusterRole                   = "ClusterRole"
 	kindDeployment                    = "Deployment"
 	kindNetworkPolicy                 = "NetworkPolicy"
@@ -199,25 +193,11 @@ func (r *WorkbenchesReconciler) renderAndApply(
 	return nil
 }
 
-// ingressConfigHash returns the sha256 of the rendered ingresses payload,
-// hex encoded. It is written to the notebook controller ConfigMap next to
-// the payload so the consumer can verify the integrity of what it reads.
-func ingressConfigHash(payload string) string {
-	sum := sha256.Sum256([]byte(payload))
-	return hex.EncodeToString(sum[:])
-}
-
 // applyIngressConfig builds and applies the notebook controller ingress
 // ConfigMap, returning it for desired-set tracking. Ingress assignments are
 // applied first so operand controllers start with their config. The consumer
 // reads the ConfigMap dynamically on each reconciliation, so no operand
 // rollout is involved in delivery.
-//
-// Stale contract data is cleared after the apply: omitting the key from the
-// SSA would not remove a value owned by another field manager, and ConfigMap
-// data values are typed strings, so an atomic null in the same payload is
-// coerced to "". Applying first keeps every intermediate state a coherent
-// (ingresses, contract) pair instead of a fail-closed gap.
 func (r *WorkbenchesReconciler) applyIngressConfig(
 	ctx context.Context,
 	owner *componentsv1alpha1.Workbenches,
@@ -228,14 +208,8 @@ func (r *WorkbenchesReconciler) applyIngressConfig(
 		return nil, fmt.Errorf("marshal ingresses: %w", err)
 	}
 
-	// The hash sits next to the payload for the consumer to verify the
-	// integrity of what it reads (see the notebook controller's checksum
-	// verification).
-	hash := ingressConfigHash(string(ingresses))
-
 	data := map[string]any{
-		IngressesConfigMapKey:     string(ingresses),
-		IngressesHashConfigMapKey: hash,
+		IngressesConfigMapKey: string(ingresses),
 	}
 
 	config := &unstructured.Unstructured{Object: map[string]any{
