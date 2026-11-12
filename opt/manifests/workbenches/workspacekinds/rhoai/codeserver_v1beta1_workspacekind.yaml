@@ -61,8 +61,26 @@ spec:
     options:
       imageConfig:
         spawner:
-          default: "code-server-notebook:3.6"
+          default: "code-server-notebook:3.7"
         values:
+          ## Code Server | Data Science | CPU | Python 3.12 (3.7)
+          ## ImageStream code-server-notebook:3.7
+          - id: "code-server-notebook:3.7"
+            spawner:
+              displayName: "Code Server | Data Science | CPU | Python 3.12 (3.7)"
+              description: "code-server workbench allows users to code, build, and collaborate on projects directly from web."
+              labels:
+                - key: "codeserver_version"
+                  value: "4.122"
+                - key: "python_version"
+                  value: "v3.12"
+            spec:
+              image: "odh-workbench-codeserver-datascience-cpu-py312-ubi9-n_PLACEHOLDER"
+              imagePullPolicy: "Always"
+              ports:
+                - id: "codeserver"
+                  port: 8787
+
           ## Code Server | Data Science | CPU | Python 3.12 (3.6)
           ## ImageStream code-server-notebook:3.6
           - id: "code-server-notebook:3.6"
@@ -74,8 +92,15 @@ spec:
                   value: "4.122"
                 - key: "python_version"
                   value: "v3.12"
+            redirect:
+              to: "code-server-notebook:3.7"
+              message:
+                level: "Info"
+                text: >
+                  A newer version of this workbench image is available.
+                  Update to code-server-notebook:3.7 when convenient.
             spec:
-              image: "odh-workbench-codeserver-datascience-cpu-py312-ubi9-n_PLACEHOLDER"
+              image: "odh-workbench-codeserver-datascience-cpu-py312-ubi9-3-6_PLACEHOLDER"
               imagePullPolicy: "Always"
               ports:
                 - id: "codeserver"
@@ -93,12 +118,12 @@ spec:
                 - key: "python_version"
                   value: "v3.12"
             redirect:
-              to: "code-server-notebook:3.6"
+              to: "code-server-notebook:3.7"
               message:
                 level: "Info"
                 text: >
                   A newer version of this workbench image is available.
-                  Update to code-server-notebook:3.6 when convenient.
+                  Update to code-server-notebook:3.7 when convenient.
             spec:
               image: "odh-workbench-codeserver-datascience-cpu-py312-ubi9-3-5_PLACEHOLDER"
               imagePullPolicy: "Always"
@@ -119,12 +144,12 @@ spec:
                   value: "v3.12"
               hidden: true
             redirect:
-              to: "code-server-notebook:3.6"
+              to: "code-server-notebook:3.7"
               message:
                 level: "Warning"
                 text: >
                   A newer version of this workbench image is available.
-                  Update to code-server-notebook:3.6 when convenient.
+                  Update to code-server-notebook:3.7 when convenient.
             spec:
               image: "odh-workbench-codeserver-datascience-cpu-py312-ubi9-3-4_PLACEHOLDER"
               imagePullPolicy: "Always"
@@ -144,12 +169,12 @@ spec:
                 - key: "python_version"
                   value: "v3.12"
             redirect:
-              to: "code-server-notebook:3.6"
+              to: "code-server-notebook:3.7"
               message:
                 level: "Info"
                 text: >
                   A newer version of this workbench image is available.
-                  Update to code-server-notebook:3.6 when convenient.
+                  Update to code-server-notebook:3.7 when convenient.
             spec:
               image: "odh-workbench-codeserver-datascience-cpu-py312-ubi9-2025-2_PLACEHOLDER"
               imagePullPolicy: "Always"
@@ -170,12 +195,12 @@ spec:
                   value: "v3.11"
               hidden: true
             redirect:
-              to: "code-server-notebook:3.6"
+              to: "code-server-notebook:3.7"
               message:
                 level: "Warning"
                 text: >
                   A newer version of this workbench image is available.
-                  Update to code-server-notebook:3.6 when convenient.
+                  Update to code-server-notebook:3.7 when convenient.
             spec:
               image: "odh-workbench-codeserver-datascience-cpu-py311-ubi9-2025-1_PLACEHOLDER"
               imagePullPolicy: "Always"
