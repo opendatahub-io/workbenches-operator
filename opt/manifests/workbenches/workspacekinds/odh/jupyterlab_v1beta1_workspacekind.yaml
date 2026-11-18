@@ -79,7 +79,8 @@ spec:
     - config:
         secondsSinceActive: 7200
         minRunningSeconds: 300
-      match: {}
+      ## empty match is the catch-all and must be a list
+      match: []
       effect:
         pauseWorkspace: true
 
@@ -90,11 +91,24 @@ spec:
     activityProbe:
       minProbeIntervalSeconds: 300
       probeIntervalSeconds: 3600
-      jupyter:
-        lastActivity: true
-        portId: "jupyterlab"
-    probes: {}
-    volumeMounts:
+      ## podExec replaces the removed jupyter probe. It reports Jupyter Server
+      ## /api/status last_activity. NB_PREFIX is ServerApp.base_url. Port 8888
+      ## matches every jupyterlab imageConfig in this kind. A non-zero exit is a
+      ## probe failure and does not pause the Workspace.
+      podExec:
+        timeoutSeconds: 60
+        script: |
+          #!/usr/bin/env python3
+          import json, os, urllib.request
+          prefix = os.environ.get("NB_PREFIX") or "/"
+          if not prefix.endswith("/"):
+              prefix += "/"
+          url = "http://127.0.0.1:8888" + prefix + "api/status"
+          with urllib.request.urlopen(url, timeout=30) as resp:
+              last = json.load(resp)["last_activity"]
+          with open(os.environ["OUTPUT_JSON_PATH"], "w", encoding="utf-8") as out:
+              json.dump({"last_activity": last}, out)
+    volumeMountPaths:
       ## ODH/RHOAI UBI workbench images use /opt/app-root/src as the user home
       home: "/opt/app-root/src"
     ports:
@@ -104,34 +118,36 @@ spec:
         httpProxy:
           removePathPrefix: false
           requestHeaders: {}
-    extraEnv:
-      - name: "NB_PREFIX"
-        value: |-
-          {{ httpPathPrefix "jupyterlab" }}
-      ## Jupyter auth is disabled in-container; access is restricted to authenticated
-      ## gateway-only ingress (kube-rbac-proxy / Workspace gateway). Direct Pod ingress
-      ## is not exposed to users.
-      - name: "NOTEBOOK_ARGS"
-        value: |-
-          --ServerApp.port=8888 --ServerApp.token='' --ServerApp.password='' --ServerApp.base_url={{ httpPathPrefix "jupyterlab" }} --ServerApp.quit_button=False
-    extraVolumeMounts:
-      - name: "dshm"
-        mountPath: "/dev/shm"
-    extraVolumes:
-      - name: "dshm"
-        emptyDir:
-          medium: "Memory"
-    securityContext:
-      seccompProfile:
-        type: RuntimeDefault
-    containerSecurityContext:
-      allowPrivilegeEscalation: false
-      capabilities:
-        drop:
-          - ALL
-      runAsNonRoot: true
-      seccompProfile:
-        type: RuntimeDefault
+    podSpec:
+      securityContext:
+        seccompProfile:
+          type: RuntimeDefault
+      extraVolumes:
+        - name: "dshm"
+          emptyDir:
+            medium: "Memory"
+      mainContainer:
+        securityContext:
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop:
+              - ALL
+          runAsNonRoot: true
+          seccompProfile:
+            type: RuntimeDefault
+        extraEnv:
+          - name: "NB_PREFIX"
+            value: |-
+              {{ httpPathPrefix "jupyterlab" }}
+          ## Jupyter auth is disabled in-container; access is restricted to authenticated
+          ## gateway-only ingress (kube-rbac-proxy / Workspace gateway). Direct Pod ingress
+          ## is not exposed to users.
+          - name: "NOTEBOOK_ARGS"
+            value: |-
+              --ServerApp.port=8888 --ServerApp.token='' --ServerApp.password='' --ServerApp.base_url={{ httpPathPrefix "jupyterlab" }} --ServerApp.quit_button=False
+        extraVolumeMounts:
+          - name: "dshm"
+            mountPath: "/dev/shm"
     options:
       imageConfig:
         spawner:

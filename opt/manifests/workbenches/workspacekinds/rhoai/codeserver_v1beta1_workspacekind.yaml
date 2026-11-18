@@ -23,14 +23,13 @@ spec:
     logo:
       url: "https://upload.wikimedia.org/wikipedia/commons/9/9a/Visual_Studio_Code_1.35_icon.svg"
 
-  ## No activityRules: code-server has no reliable idle-activity signal (unlike
-  ## jupyter.lastActivity). Auto-pause is intentionally disabled until a validated
-  ## podExec probe exists.
+  ## No activityRules: code-server has no reliable idle-activity signal.
+  ## Auto-pause stays disabled until a validated podExec probe exists.
   podTemplate:
     podMetadata:
       labels: {}
       annotations: {}
-    volumeMounts:
+    volumeMountPaths:
       home: "/opt/app-root/src"
     ports:
       - id: "codeserver"
@@ -39,25 +38,27 @@ spec:
         httpProxy:
           removePathPrefix: true
           requestHeaders: {}
-    extraEnv: []
-    extraVolumeMounts:
-      - name: "dshm"
-        mountPath: "/dev/shm"
-    extraVolumes:
-      - name: "dshm"
-        emptyDir:
-          medium: "Memory"
-    securityContext:
-      seccompProfile:
-        type: RuntimeDefault
-    containerSecurityContext:
-      allowPrivilegeEscalation: false
-      capabilities:
-        drop:
-          - ALL
-      runAsNonRoot: true
-      seccompProfile:
-        type: RuntimeDefault
+    podSpec:
+      securityContext:
+        seccompProfile:
+          type: RuntimeDefault
+      extraVolumes:
+        - name: "dshm"
+          emptyDir:
+            medium: "Memory"
+      mainContainer:
+        securityContext:
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop:
+              - ALL
+          runAsNonRoot: true
+          seccompProfile:
+            type: RuntimeDefault
+        extraEnv: []
+        extraVolumeMounts:
+          - name: "dshm"
+            mountPath: "/dev/shm"
     options:
       imageConfig:
         spawner:
