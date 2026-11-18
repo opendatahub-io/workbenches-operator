@@ -40,15 +40,13 @@ spec:
               matchLabels:
                 gpu_vendor: nvidia
 
-  ## No activityRules: code-server has no reliable idle-activity signal (unlike
-  ## jupyter.lastActivity). Auto-pause is intentionally disabled until a validated
-  ## podExec probe exists.
+  ## No activityRules: code-server has no reliable idle-activity signal.
+  ## Auto-pause stays disabled until a validated podExec probe exists.
   podTemplate:
     podMetadata:
       labels: {}
       annotations: {}
-    probes: {}
-    volumeMounts:
+    volumeMountPaths:
       home: "/opt/app-root/src"
     ports:
       - id: "codeserver"
@@ -57,25 +55,27 @@ spec:
         httpProxy:
           removePathPrefix: true
           requestHeaders: {}
-    extraEnv: []
-    extraVolumeMounts:
-      - name: "dshm"
-        mountPath: "/dev/shm"
-    extraVolumes:
-      - name: "dshm"
-        emptyDir:
-          medium: "Memory"
-    securityContext:
-      seccompProfile:
-        type: RuntimeDefault
-    containerSecurityContext:
-      allowPrivilegeEscalation: false
-      capabilities:
-        drop:
-          - ALL
-      runAsNonRoot: true
-      seccompProfile:
-        type: RuntimeDefault
+    podSpec:
+      securityContext:
+        seccompProfile:
+          type: RuntimeDefault
+      extraVolumes:
+        - name: "dshm"
+          emptyDir:
+            medium: "Memory"
+      mainContainer:
+        securityContext:
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop:
+              - ALL
+          runAsNonRoot: true
+          seccompProfile:
+            type: RuntimeDefault
+        extraEnv: []
+        extraVolumeMounts:
+          - name: "dshm"
+            mountPath: "/dev/shm"
     options:
       imageConfig:
         spawner:
