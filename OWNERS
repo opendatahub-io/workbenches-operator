@@ -6,3 +6,16 @@ reviewers:
   - harshad16
   - jstourac
   - thaorell
+# API contract configuration: the descriptor, workflow, and baseline commit keep the
+# contract checks honest, so changes need owner review (RHOAIENG-103192).
+filters:
+  "^\\.github/workflows/api-contract\\.yml$":
+    approvers:
+      - harshad16
+      - jstourac
+      - thaorell
+  "^\\.rhoai/":
+    approvers:
+      - harshad16
+      - jstourac
+      - thaorell
