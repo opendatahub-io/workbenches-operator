@@ -45,7 +45,7 @@ opt/manifest-sources.sh         Per-branch operand org/repo/ref map (kept by syn
 chaos/                          operator-chaos knowledge models (profiles/odh, profiles/rhoai) + experiments
 ci/                             Go directive bump + ODH manifest SHA pin helpers
 hack/                           Boilerplate + Helm chart sync/verify scripts
-.github/workflows/              CI (test, build, lint, e2e, govulncheck, disconnected-readiness, operator-chaos, manifests-sync-main/stable, sync-branches, TLS lint, Semgrep)
+.github/workflows/              CI (test, build, lint, e2e, govulncheck, disconnected-readiness, operator-chaos, manifests-sync-main/stable, sync-branches/via-pr, TLS lint, Semgrep)
 .github/dependabot.yml          Dependabot: weekly GHA bumps + Go security-only updates
 .pre-commit-config.yaml         pre-commit hooks (golangci-lint skipped in CI; dedicated lint job exists)
 semgrep.yaml                    Semgrep TLS compliance rules
@@ -160,7 +160,8 @@ GitHub Actions in `.github/workflows/`:
 - `manifests-sync-main.yaml` — daily refresh of `opt/manifests/` on `main` (opens PR)
 - `manifests-sync-stable.yaml` — on push to `stable`/`v1.x` (daily on `stable`), commit manifests directly (`bump-shas` on `stable` only; `v1.x` keeps tag pins)
 - `go-directive-updater.yaml` — weekly `go` directive patch bump in `go.mod`
-- `sync-branches.yaml` — manual/workflow_call branch sync (`main→stable`, `stable→v1.x`); keeps target `opt/manifests`, `opt/manifest-sources.sh`, and `.tekton`
+- `sync-branches.yaml` — reusable merge engine (source→target); keeps target `opt/manifests`, `opt/manifest-sources.sh`, and `.tekton`
+- `sync-via-pr.yaml` / `sync-main-to-stable.yaml` / `sync-stable-to-v1.x.yaml` — daily PR-based sync (`main→stable` at 06:00 UTC, `stable→v1.x` at 08:00 UTC); requires `GHA_SECRET_PAT`
 - `tls-lint.yml` — TLS configuration lint (`tls-config-lint`) with SARIF upload
 - `semgrep-tls.yml` — Semgrep TLS compliance rules on PRs
 

@@ -7,8 +7,8 @@
 #   2. "tag"                 — immutable reference (e.g., v1.0.0)
 #   3. "branch@commit-sha"   — branch tracking pin (e.g., stable@a1b2c3d4)
 #
-# This file is not overwritten by main→stable / stable→v1.x sync-branches
-# (see .github/workflows/sync-branches.yaml). Script changes in
+# This file is not overwritten by main→stable / stable→v1.x branch sync
+# (see .github/workflows/sync-branches.yaml / sync-via-pr.yaml). Script changes in
 # get_all_manifests.sh still propagate; pins and refs stay on the target branch.
 # shellcheck disable=SC2034
 

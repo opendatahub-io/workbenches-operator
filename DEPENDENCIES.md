@@ -104,12 +104,14 @@ The main sync workflow needs permission to open PRs. Enable **Settings → Actio
 
 Manifest sources are defined in `opt/manifest-sources.sh` as two maps (same
 pattern as opendatahub-operator / rhods-operator). `get_all_manifests.sh` loads
-that file. Branch sync (`.github/workflows/sync-branches.yaml`) keeps the
-**target** copy of `opt/manifest-sources.sh` and `opt/manifests/` so
+that file. Branch sync (`.github/workflows/sync-branches.yaml`, driven daily via
+`sync-main-to-stable.yaml` / `sync-stable-to-v1.x.yaml` and `sync-via-pr.yaml`)
+keeps the **target** copy of `opt/manifest-sources.sh` and `opt/manifests/` so
 `main → stable` cannot overwrite `stable@sha` pins and `stable → v1.x` cannot
 overwrite tag pins. Fetch-script changes in `get_all_manifests.sh` still
 propagate. The target branch must already have `opt/manifest-sources.sh`;
-sync-branches will not copy it from the source branch.
+sync-branches will not copy it from the source branch. Scheduled sync PRs
+require the `GHA_SECRET_PAT` repository secret.
 
 - `ODH_COMPONENT_MANIFESTS` — upstream `opendatahub-io` sources (default)
 - `RHOAI_COMPONENT_MANIFESTS` — downstream `red-hat-data-services` sources
