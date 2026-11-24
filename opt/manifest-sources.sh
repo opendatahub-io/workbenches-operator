@@ -18,8 +18,8 @@ declare -A ODH_COMPONENT_MANIFESTS=(
     ["workbenches/odh-notebook-controller"]="opendatahub-io:kubeflow:stable@905c3ff9beb33e40e22ba6a617ada5e4813d0f0d:components/odh-notebook-controller/config"
     # notebooks stable is no longer updated. Track main@sha; the stable sync
     # bump job advances this pin to the current main HEAD.
-    ["workbenches/notebooks"]="opendatahub-io:notebooks:main@c93a6fa355920298e9b94bcb658f0f744a29f65a:manifests"
-    ["workbenches/workspaces-controller"]="opendatahub-io:workbenches:stable@240ff7a0f748e13dbb109e5bf3ed55be2c85a726:workspaces/controller/manifests/kustomize"
+    ["workbenches/notebooks"]="opendatahub-io:notebooks:main@855250da33f35db62b77f65a2b824fa213e215b0:manifests"
+    ["workbenches/workspaces-controller"]="opendatahub-io:workbenches:stable@478fee0f74c3da5c02a5c0f051df1ae196941a87:workspaces/controller/manifests/kustomize"
 )
 
 # RHOAI (downstream) Component Manifests
