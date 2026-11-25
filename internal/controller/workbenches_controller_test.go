@@ -108,6 +108,12 @@ var _ = Describe("Workbenches Controller", func() {
 		}
 	})
 
+	interceptClient := func(funcs interceptor.Funcs) {
+		watchClient, err := client.NewWithWatch(cfg, client.Options{Scheme: scheme.Scheme})
+		Expect(err).NotTo(HaveOccurred())
+		reconciler.Client = interceptor.NewClient(watchClient, funcs)
+	}
+
 	// Readiness fixtures must be in the desired manifests so continuous GC retains them.
 	createDesiredDeployment := func(namespace, name string) {
 		deployment := createDeployment(namespace, name)
@@ -455,6 +461,12 @@ resources:
 				}
 				_, err = reconcileWorkbenches(reconciler, wb)
 				Expect(err).To(MatchError(And(ContainSubstring("duplicate resource"), ContainSubstring(applicationsNamespace+"/"+name))))
+				failed := getWorkbenches(wb.Name)
+				Expect(failed.Status.Phase).To(Equal(statusutil.PhaseFailed))
+				ready := meta.FindStatusCondition(failed.Status.Conditions, "Ready")
+				Expect(ready).To(HaveField("Status", metav1.ConditionFalse))
+				Expect(ready).To(HaveField("Reason", "ManifestApplyFailed"))
+
 				wantApplied := []string{controller.NotebookControllerConfigMap}
 				if name != controller.NotebookControllerConfigMap {
 					wantApplied = append(wantApplied, name)
@@ -1001,7 +1013,50 @@ resources:
 			Expect(updated.Status.Phase).To(Equal(statusutil.PhaseReady))
 		})
 
-		It("Should gate Ready on distribution alignment before deployments are ready", func() {
+		It("Should acknowledge a managed platform version change only after reporting it pending", func() {
+			const nextPlatformVersion = "2.21.0"
+			ensureNamespace(applicationsNamespace)
+			createDesiredDeployment(applicationsNamespace, testNotebookControllerDeployment)
+			createPlatformConfig(applicationsNamespace, "OpenDataHub", "1.0.0", testPlatformVersion)
+			wb := createWorkbenches("Managed", "", "OpenDataHub")
+			DeferCleanup(func() {
+				cleanupWorkbenches(wb)
+				cleanupDeployments(applicationsNamespace)
+				cleanupPlatformConfig(applicationsNamespace)
+			})
+
+			result, err := reconcileWorkbenches(reconciler, wb)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(result).To(Equal(ctrl.Result{}))
+			before := getWorkbenches(wb.Name)
+			Expect(meta.IsStatusConditionTrue(before.Status.Conditions, "Ready")).To(BeTrue())
+			Expect(findPlatformRelease(before.Status.Releases)).To(HaveField("Version", testPlatformVersion))
+
+			updatePlatformConfig(applicationsNamespace, "OpenDataHub", "1.0.0", nextPlatformVersion)
+			result, err = reconciler.Reconcile(ctx, requestFor(wb))
+			Expect(err).NotTo(HaveOccurred())
+			Expect(result.RequeueAfter).To(BeNumerically(">", 0))
+
+			pending := getWorkbenches(wb.Name)
+			Expect(findPlatformRelease(pending.Status.Releases)).To(HaveField("Version", testPlatformVersion))
+			Expect(pending.Status.Distribution).To(Equal(before.Status.Distribution))
+			Expect(meta.IsStatusConditionTrue(pending.Status.Conditions, "DeploymentsAvailable")).To(BeTrue())
+			Expect(meta.IsStatusConditionFalse(pending.Status.Conditions, "Degraded")).To(BeTrue())
+			ready := meta.FindStatusCondition(pending.Status.Conditions, "Ready")
+			Expect(ready).To(HaveField("Status", metav1.ConditionFalse))
+			Expect(ready).To(HaveField("Reason", "PlatformVersionPending"))
+			Expect(ready).To(HaveField("Message", And(ContainSubstring(testPlatformVersion), ContainSubstring(nextPlatformVersion))))
+
+			result, err = reconciler.Reconcile(ctx, requestFor(wb))
+			Expect(err).NotTo(HaveOccurred())
+			Expect(result).To(Equal(ctrl.Result{}))
+			after := getWorkbenches(wb.Name)
+			Expect(findPlatformRelease(after.Status.Releases)).To(HaveField("Version", nextPlatformVersion))
+			Expect(after.Status.Phase).To(Equal(statusutil.PhaseReady))
+			Expect(meta.IsStatusConditionTrue(after.Status.Conditions, "Ready")).To(BeTrue())
+		})
+
+		It("Should leave distribution unset until deployments are ready", func() {
 			nsName := "test-ns-dist-pending"
 			createNamespace(nsName)
 			createPlatformConfig(applicationsNamespace, "OpenDataHub", "1.0.0", testPlatformVersion)
@@ -1108,6 +1163,70 @@ resources:
 			deploys := &appsv1.DeploymentList{}
 			Expect(k8sClient.List(ctx, deploys, client.InNamespace(legacyNS))).To(Succeed())
 			Expect(deploys.Items).To(BeEmpty(), "operands must not deploy into legacy workbenchNamespace")
+		})
+	})
+
+	Context("When a reconcile operation fails", func() {
+		It("Should report a PlatformConfig read failure without provisioning", func() {
+			wb := createWorkbenches("Managed", "", "OpenDataHub")
+			DeferCleanup(cleanupWorkbenches, wb)
+
+			readErr := errors.New("platform config unavailable")
+			platformConfigKey := client.ObjectKey{Namespace: applicationsNamespace, Name: platformconfig.ConfigMapName}
+			interceptClient(interceptor.Funcs{
+				Get: func(ctx context.Context, c client.WithWatch, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
+					if _, ok := obj.(*corev1.ConfigMap); ok && key == platformConfigKey {
+						return readErr
+					}
+					return c.Get(ctx, key, obj, opts...)
+				},
+			})
+
+			_, err := reconcileWorkbenches(reconciler, wb)
+			Expect(err).To(MatchError(readErr))
+			failed := getWorkbenches(wb.Name)
+			Expect(failed.Status.Phase).To(Equal(statusutil.PhaseFailed))
+			Expect(failed.Status.ObservedGeneration).To(Equal(failed.Generation))
+			Expect(failed.Status.ApplicationsNamespace).To(Equal(applicationsNamespace))
+			ready := meta.FindStatusCondition(failed.Status.Conditions, "Ready")
+			Expect(ready).To(HaveField("Status", metav1.ConditionFalse))
+			Expect(ready).To(HaveField("Reason", "PlatformConfigReadFailed"))
+			Expect(meta.FindStatusCondition(failed.Status.Conditions, "ProvisioningSucceeded")).To(BeNil())
+		})
+
+		It("Should return a status update conflict and converge on retry", func() {
+			ensureNamespace(applicationsNamespace)
+			createDesiredDeployment(applicationsNamespace, testNotebookControllerDeployment)
+			wb := createWorkbenches("Managed", "", "OpenDataHub")
+			DeferCleanup(func() {
+				cleanupWorkbenches(wb)
+				cleanupDeployments(applicationsNamespace)
+			})
+
+			_, err := reconciler.Reconcile(ctx, requestFor(wb))
+			Expect(err).NotTo(HaveOccurred())
+			originalClient := reconciler.Client
+			interceptClient(interceptor.Funcs{
+				SubResourceUpdate: func(ctx context.Context, c client.Client, name string, obj client.Object, opts ...client.SubResourceUpdateOption) error {
+					if _, ok := obj.(*componentsv1alpha1.Workbenches); ok && name == "status" {
+						return apierrors.NewConflict(componentsv1alpha1.GroupVersion.WithResource("workbenches").GroupResource(), obj.GetName(),
+							errors.New("concurrent status update"))
+					}
+					return c.SubResource(name).Update(ctx, obj, opts...)
+				},
+			})
+
+			_, err = reconciler.Reconcile(ctx, requestFor(wb))
+			Expect(apierrors.IsConflict(err)).To(BeTrue(), "expected conflict, got %v", err)
+			Expect(getWorkbenches(wb.Name).Status.Phase).To(Equal(statusutil.PhasePending))
+
+			reconciler.Client = originalClient
+			result, err := reconciler.Reconcile(ctx, requestFor(wb))
+			Expect(err).NotTo(HaveOccurred())
+			Expect(result).To(Equal(ctrl.Result{}))
+			ready := getWorkbenches(wb.Name)
+			Expect(ready.Status.ObservedGeneration).To(Equal(ready.Generation))
+			Expect(meta.IsStatusConditionTrue(ready.Status.Conditions, "Ready")).To(BeTrue())
 		})
 	})
 
@@ -1247,6 +1366,47 @@ resources:
 			Expect(deploys.Items).To(BeEmpty())
 		})
 
+		It("Should retain the finalizer when cleanup fails and finish deletion on retry", func() {
+			ensureNamespace(applicationsNamespace)
+			createDesiredDeployment(applicationsNamespace, testNotebookControllerDeployment)
+			deployment := client.ObjectKey{Namespace: applicationsNamespace, Name: testNotebookControllerDeployment}
+			wb := createWorkbenches("Managed", "", "OpenDataHub")
+			DeferCleanup(func() {
+				cleanupWorkbenches(wb)
+				cleanupDeployments(applicationsNamespace)
+			})
+
+			_, err := reconcileWorkbenches(reconciler, wb)
+			Expect(err).NotTo(HaveOccurred())
+			finalizers := getWorkbenches(wb.Name).Finalizers
+			Expect(finalizers).NotTo(BeEmpty())
+			Expect(k8sClient.Delete(ctx, wb)).To(Succeed())
+
+			deleteErr := errors.New("operand deletion failed")
+			originalClient := reconciler.Client
+			interceptClient(interceptor.Funcs{
+				Delete: func(ctx context.Context, c client.WithWatch, obj client.Object, opts ...client.DeleteOption) error {
+					if obj.GetObjectKind().GroupVersionKind() == gvk.Deployment && client.ObjectKeyFromObject(obj) == deployment {
+						return deleteErr
+					}
+					return c.Delete(ctx, obj, opts...)
+				},
+			})
+
+			_, err = reconciler.Reconcile(ctx, requestFor(wb))
+			Expect(err).To(MatchError(deleteErr))
+			deleting := getWorkbenches(wb.Name)
+			Expect(deleting.DeletionTimestamp.IsZero()).To(BeFalse())
+			Expect(deleting.Finalizers).To(Equal(finalizers))
+			Expect(k8sClient.Get(ctx, deployment, &appsv1.Deployment{})).To(Succeed())
+
+			reconciler.Client = originalClient
+			_, err = reconciler.Reconcile(ctx, requestFor(wb))
+			Expect(err).NotTo(HaveOccurred())
+			Expect(apierrors.IsNotFound(k8sClient.Get(ctx, requestFor(wb).NamespacedName, &componentsv1alpha1.Workbenches{}))).To(BeTrue())
+			Expect(apierrors.IsNotFound(k8sClient.Get(ctx, deployment, &appsv1.Deployment{}))).To(BeTrue())
+		})
+
 		It("Should skip cleanup and complete deletion when finalizer is absent", func() {
 			nsName := "test-ns-no-finalizer"
 			ensureNamespace(applicationsNamespace)
@@ -1379,20 +1539,25 @@ resources:
 	})
 
 	Context("When transitioning between states", func() {
-		It("Should transition from Managed to Removed", func() {
-			nsName := "test-ns-transition"
-			wb := createWorkbenches("Managed", nsName, "OpenDataHub")
+		It("Should clear the reported distribution and releases when a ready module is Removed", func() {
+			ensureNamespace(applicationsNamespace)
+			createDesiredDeployment(applicationsNamespace, testNotebookControllerDeployment)
+			createPlatformConfig(applicationsNamespace, "OpenDataHub", "1.0.0", testPlatformVersion)
+			wb := createWorkbenches("Managed", "", "OpenDataHub")
 
 			DeferCleanup(func() {
 				cleanupWorkbenches(wb)
-				cleanupNamespace(nsName)
+				cleanupDeployments(applicationsNamespace)
+				cleanupPlatformConfig(applicationsNamespace)
 			})
 
-			_, err := reconciler.Reconcile(ctx, requestFor(wb))
+			_, err := reconcileWorkbenches(reconciler, wb)
 			Expect(err).NotTo(HaveOccurred())
-
-			// Transition to Removed
 			updated := getWorkbenches(wb.Name)
+			Expect(meta.IsStatusConditionTrue(updated.Status.Conditions, "Ready")).To(BeTrue())
+			Expect(updated.Status.Distribution.Name).To(Equal("OpenDataHub"))
+			Expect(findPlatformRelease(updated.Status.Releases)).To(HaveField("Version", testPlatformVersion))
+
 			updated.Spec.ManagementState = "Removed"
 			Expect(k8sClient.Update(ctx, updated)).To(Succeed())
 
@@ -1402,6 +1567,9 @@ resources:
 
 			final := getWorkbenches(wb.Name)
 			Expect(final.Status.Phase).To(Equal(statusutil.PhaseFailed))
+			Expect(final.Status.Distribution).To(Equal(componentsv1alpha1.Distribution{}))
+			Expect(final.Status.Releases).To(BeEmpty())
+			Expect(final.Status.ObservedGeneration).To(Equal(final.Generation))
 
 			readyCond := meta.FindStatusCondition(final.Status.Conditions, "Ready")
 			Expect(readyCond).NotTo(BeNil())
