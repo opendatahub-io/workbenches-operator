@@ -41,6 +41,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
+	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 	"sigs.k8s.io/yaml"
 
 	componentsv1alpha1 "github.com/opendatahub-io/workbenches-operator/api/v1alpha1"
@@ -133,6 +134,60 @@ var _ = Describe("Workbenches Controller", func() {
 				[]byte("apiVersion: kustomize.config.k8s.io/v1beta1\nkind: Kustomization\nresources: [deployment.yaml]\n"), 0o600)).To(Succeed())
 		}
 	}
+	Context("PlatformConfig watch", func() {
+		It("Should reconcile a Ready managed module when the platform ConfigMap changes", func() {
+			const initialDistributionVersion = "1.0.0"
+			const nextDistributionVersion = "2.0.0"
+			ensureNamespace(applicationsNamespace)
+			createDesiredDeployment(applicationsNamespace, testNotebookControllerDeployment)
+			createPlatformConfig(applicationsNamespace, "OpenDataHub", initialDistributionVersion, testPlatformVersion)
+			wb := createWorkbenches("Managed", "", "OpenDataHub")
+			DeferCleanup(func() {
+				cleanupWorkbenches(wb)
+				cleanupDeployments(applicationsNamespace)
+				cleanupPlatformConfig(applicationsNamespace)
+			})
+
+			mgr, err := ctrl.NewManager(cfg, ctrl.Options{
+				Scheme:  scheme.Scheme,
+				Metrics: metricsserver.Options{BindAddress: "0"},
+			})
+			Expect(err).NotTo(HaveOccurred())
+			reconciler.Client = mgr.GetClient()
+			Expect(reconciler.SetupWithManager(mgr)).To(Succeed())
+
+			managerCtx, stopManager := context.WithCancel(ctx)
+			managerDone := make(chan error, 1)
+			go func() { managerDone <- mgr.Start(managerCtx) }()
+			DeferCleanup(func() {
+				stopManager()
+				Eventually(managerDone).WithTimeout(10 * time.Second).Should(Receive(Succeed()))
+			})
+
+			expectReadyVersion := func(g Gomega, version string) {
+				latest := &componentsv1alpha1.Workbenches{}
+				g.Expect(k8sClient.Get(ctx, requestFor(wb).NamespacedName, latest)).To(Succeed())
+				g.Expect(meta.IsStatusConditionTrue(latest.Status.Conditions, "Ready")).To(BeTrue())
+				g.Expect(latest.Status.Distribution.Version).To(Equal(version))
+			}
+			Eventually(func(g Gomega) { expectReadyVersion(g, initialDistributionVersion) }).WithTimeout(10 * time.Second).Should(Succeed())
+
+			// Drain startup activity before changing only the non-owned platform ConfigMap.
+			// Keep the convergence timeout below the controller's 30s readiness retry.
+			readyResourceVersion := getWorkbenches(wb.Name).ResourceVersion
+			Consistently(func(g Gomega) {
+				latest := &componentsv1alpha1.Workbenches{}
+				g.Expect(k8sClient.Get(ctx, requestFor(wb).NamespacedName, latest)).To(Succeed())
+				g.Expect(latest.ResourceVersion).To(Equal(readyResourceVersion))
+			}).WithTimeout(time.Second).Should(Succeed())
+
+			// Change only the distribution version, so the platform-release handshake
+			// does not itself need a second reconcile after the watch fires.
+			updatePlatformConfig(applicationsNamespace, "OpenDataHub", nextDistributionVersion, testPlatformVersion)
+			Eventually(func(g Gomega) { expectReadyVersion(g, nextDistributionVersion) }).WithTimeout(10 * time.Second).Should(Succeed())
+		})
+	})
+
 	Context("Workbench probe configuration", func() {
 		It("Should default and validate the probe timeout in the CRD", func() {
 			wb := createWorkbenches("Managed", "probe-validation-notebooks", "OpenDataHub")
