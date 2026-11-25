@@ -28,6 +28,27 @@ jobs:
       - name: Run unit tests
         run: make unit-test
 
+      - name: Require 80% controller statement coverage
+        run: |
+          awk -v minimum=80 '
+            $1 ~ /\/internal\/controller\/[^/:]+\.go:/ {
+              statements += $2
+              if ($3 > 0) covered += $2
+            }
+            END {
+              if (statements == 0) {
+                print "::error::No internal/controller statements found in cover.out"
+                exit 1
+              }
+              printf "internal/controller statement coverage: %.2f%% (%d/%d; minimum %d%%)\n", \
+                100 * covered / statements, covered, statements, minimum
+              if (100 * covered < minimum * statements) {
+                print "::error::internal/controller statement coverage is below the minimum"
+                exit 1
+              }
+            }
+          ' cover.out
+
       - name: Upload coverage artifact
         if: always()
         uses: actions/upload-artifact@v7
