@@ -1032,7 +1032,8 @@ spec:
                 - key: "python_version"
                   value: "v3.12"
                 - key: "pytorch_version"
-                  value: "2.11"
+                  value: "2.12"
+              hidden: true
             spec:
               image: "odh-workbench-jupyter-pytorch-rocm-py312-ubi9-3-6_PLACEHOLDER"
               imagePullPolicy: "Always"
@@ -1053,6 +1054,7 @@ spec:
                   value: "v3.12"
                 - key: "pytorch_version"
                   value: "2.11"
+              hidden: true
             redirect:
               to: "jupyter-rocm-pytorch:3.6"
               message:
@@ -1108,6 +1110,7 @@ spec:
                   value: "v3.12"
                 - key: "pytorch_version"
                   value: "2.7"
+              hidden: true
             redirect:
               to: "jupyter-rocm-pytorch:3.6"
               message:
@@ -1319,7 +1322,8 @@ spec:
                 - key: "python_version"
                   value: "v3.12"
                 - key: "tensorflow_version"
-                  value: "2.20"
+                  value: "2.21"
+              hidden: true
             spec:
               image: "odh-workbench-jupyter-tensorflow-rocm-py312-ubi9-3-6_PLACEHOLDER"
               imagePullPolicy: "Always"
@@ -1340,6 +1344,7 @@ spec:
                   value: "v3.12"
                 - key: "tensorflow_version"
                   value: "2.19"
+              hidden: true
             redirect:
               to: "jupyter-rocm-tensorflow:3.6"
               message:
@@ -1395,6 +1400,7 @@ spec:
                   value: "v3.12"
                 - key: "tensorflow_version"
                   value: "2.18"
+              hidden: true
             redirect:
               to: "jupyter-rocm-tensorflow:3.6"
               message:
@@ -1446,6 +1452,7 @@ spec:
               labels:
                 - key: "python_version"
                   value: "v3.12"
+              hidden: true
             spec:
               image: "odh-workbench-jupyter-trustyai-cpu-py312-ubi9-3-6_PLACEHOLDER"
               imagePullPolicy: "Always"
@@ -1462,6 +1469,7 @@ spec:
               labels:
                 - key: "python_version"
                   value: "v3.12"
+              hidden: true
             redirect:
               to: "odh-trustyai-notebook:3.6"
               message:
@@ -1509,6 +1517,7 @@ spec:
               labels:
                 - key: "python_version"
                   value: "v3.12"
+              hidden: true
             redirect:
               to: "odh-trustyai-notebook:3.6"
               message:
