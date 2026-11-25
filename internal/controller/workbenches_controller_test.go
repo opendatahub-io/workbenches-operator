@@ -1539,7 +1539,7 @@ resources:
 	})
 
 	Context("When transitioning between states", func() {
-		It("Should clear the reported distribution and releases when a ready module is Removed", func() {
+		It("Should report failed cleanup on a Removed module and clear release status on retry", func() {
 			ensureNamespace(applicationsNamespace)
 			createDesiredDeployment(applicationsNamespace, testNotebookControllerDeployment)
 			createPlatformConfig(applicationsNamespace, "OpenDataHub", "1.0.0", testPlatformVersion)
@@ -1558,9 +1558,35 @@ resources:
 			Expect(updated.Status.Distribution.Name).To(Equal("OpenDataHub"))
 			Expect(findPlatformRelease(updated.Status.Releases)).To(HaveField("Version", testPlatformVersion))
 
-			updated.Spec.ManagementState = "Removed"
+			updated.Spec.ManagementState = componentsv1alpha1.ManagementStateRemoved
 			Expect(k8sClient.Update(ctx, updated)).To(Succeed())
 
+			deployment := client.ObjectKey{Namespace: applicationsNamespace, Name: testNotebookControllerDeployment}
+			deleteErr := errors.New("operand deletion failed")
+			originalClient := reconciler.Client
+			interceptClient(interceptor.Funcs{
+				Delete: func(ctx context.Context, c client.WithWatch, obj client.Object, opts ...client.DeleteOption) error {
+					if obj.GetObjectKind().GroupVersionKind() == gvk.Deployment && client.ObjectKeyFromObject(obj) == deployment {
+						return deleteErr
+					}
+					return c.Delete(ctx, obj, opts...)
+				},
+			})
+
+			_, err = reconciler.Reconcile(ctx, requestFor(wb))
+			Expect(err).To(MatchError(deleteErr))
+			failed := getWorkbenches(wb.Name)
+			Expect(failed.Status.Phase).To(Equal(statusutil.PhaseFailed))
+			Expect(failed.Status.ObservedGeneration).To(Equal(failed.Generation))
+			Expect(failed.Status.Distribution).To(Equal(updated.Status.Distribution))
+			Expect(failed.Status.Releases).To(Equal(updated.Status.Releases))
+			ready := meta.FindStatusCondition(failed.Status.Conditions, "Ready")
+			Expect(ready).To(HaveField("Status", metav1.ConditionFalse))
+			Expect(ready).To(HaveField("Reason", "CleanupFailed"))
+			Expect(ready).To(HaveField("Message", ContainSubstring(deleteErr.Error())))
+			Expect(k8sClient.Get(ctx, deployment, &appsv1.Deployment{})).To(Succeed())
+
+			reconciler.Client = originalClient
 			result, err := reconciler.Reconcile(ctx, requestFor(wb))
 			Expect(err).NotTo(HaveOccurred())
 			Expect(result).To(Equal(ctrl.Result{}))
@@ -1571,9 +1597,10 @@ resources:
 			Expect(final.Status.Releases).To(BeEmpty())
 			Expect(final.Status.ObservedGeneration).To(Equal(final.Generation))
 
-			readyCond := meta.FindStatusCondition(final.Status.Conditions, "Ready")
-			Expect(readyCond).NotTo(BeNil())
-			Expect(readyCond.Status).To(Equal(metav1.ConditionFalse))
+			ready = meta.FindStatusCondition(final.Status.Conditions, "Ready")
+			Expect(ready).To(HaveField("Status", metav1.ConditionFalse))
+			Expect(ready).To(HaveField("Reason", componentsv1alpha1.ManagementStateRemoved))
+			Expect(apierrors.IsNotFound(k8sClient.Get(ctx, deployment, &appsv1.Deployment{}))).To(BeTrue())
 		})
 	})
 
