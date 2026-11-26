@@ -9,6 +9,7 @@ name: Operator Chaos Validation
       - internal/controller/**
       - config/crd/**
       - chaos/**
+      - opt/manifests/**
   workflow_dispatch:
     inputs:
       base_ref:
@@ -35,6 +36,9 @@ jobs:
         with:
           check-latest: true
           go-version-file: go.mod
+
+      - name: Check operand inventories against rendered manifests
+        run: go test ./internal/controller -run '^(TestChaosOperandInventory|TestManagedWorkbenchesV2Inventory)$' -count=1
 
       - name: Install operator-chaos
         shell: bash
