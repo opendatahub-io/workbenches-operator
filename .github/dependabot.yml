@@ -3,6 +3,13 @@ version: 2
 updates:
   - package-ecosystem: "github-actions"
     directory: "/"
+    exclude-paths:
+      # Update these workflows in opendatahub-io/security-config and sync them here.
+      - ".github/workflows/tls-lint.yml"
+      - ".github/workflows/semgrep-tls.yml"
+      # Upgrade these installer-managed workflows together with the Fullsend config.
+      - ".github/workflows/fullsend.yaml"
+      - ".github/workflows/prioritize.yml"
     schedule:
       interval: "weekly"
     commit-message:
