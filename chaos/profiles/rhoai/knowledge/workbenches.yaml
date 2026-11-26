@@ -326,36 +326,6 @@ components:
         namespace: redhat-ods-applications
         labels:
           opendatahub.io/notebook-image: "true"
-      - apiVersion: image.openshift.io/v1
-        kind: ImageStream
-        name: runtime-datascience-2025-2
-        namespace: redhat-ods-applications
-        labels:
-          opendatahub.io/notebook-image: "true"
-      - apiVersion: image.openshift.io/v1
-        kind: ImageStream
-        name: runtime-minimal-2025-2
-        namespace: redhat-ods-applications
-        labels:
-          opendatahub.io/notebook-image: "true"
-      - apiVersion: image.openshift.io/v1
-        kind: ImageStream
-        name: runtime-pytorch-2025-2
-        namespace: redhat-ods-applications
-        labels:
-          opendatahub.io/notebook-image: "true"
-      - apiVersion: image.openshift.io/v1
-        kind: ImageStream
-        name: runtime-pytorch-llmcompressor-2025-2
-        namespace: redhat-ods-applications
-        labels:
-          opendatahub.io/notebook-image: "true"
-      - apiVersion: image.openshift.io/v1
-        kind: ImageStream
-        name: runtime-tensorflow-2025-2
-        namespace: redhat-ods-applications
-        labels:
-          opendatahub.io/notebook-image: "true"
     dependencies:
       - workbenches-operator
     steadyState:
