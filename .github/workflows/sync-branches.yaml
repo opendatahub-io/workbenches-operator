@@ -5,231 +5,157 @@ name: Sync Branches
 on:
   workflow_dispatch:
     inputs:
-      direction:
-        description: "Preset sync direction (ignored when source/target overrides are set)"
-        required: true
-        type: choice
-        options:
-          - main -> stable
-          - stable -> v1.x
-        default: main -> stable
       source:
-        description: "Optional source branch override for ad-hoc testing (requires target)"
-        required: false
+        description: "From:"
+        required: true
         type: string
       target:
-        description: "Optional target branch override for ad-hoc testing (requires source)"
-        required: false
-        type: string
-      dry_run:
-        description: "Merge and commit locally but do not push (recommended for testing)"
+        description: "To:"
         required: true
-        type: boolean
-        default: true
+        type: string
   workflow_call:
     inputs:
-      direction:
-        description: "Preset sync direction (ignored when source/target overrides are set)"
-        required: false
-        type: string
-        default: main -> stable
       source:
-        description: "Optional source branch override for ad-hoc testing (requires target)"
-        required: false
+        description: "From:"
+        required: true
         type: string
-        default: ""
       target:
-        description: "Optional target branch override for ad-hoc testing (requires source)"
-        required: false
+        description: "To:"
+        required: true
         type: string
-        default: ""
-      dry_run:
-        description: "Merge and commit locally but do not push"
-        required: false
-        type: boolean
-        default: false
+    outputs:
+      pushed:
+        description: "Whether this run pushed a new tip to the target branch"
+        value: ${{ jobs.sync-branches.outputs.pushed }}
 
 permissions: {}
+
+env:
+  SOURCE_BRANCH: ${{ inputs.source }}
+  TARGET_BRANCH: ${{ inputs.target }}
 
 jobs:
   sync-branches:
     runs-on: ubuntu-latest
     permissions:
       contents: write
-    # Pass inputs via env so they are not interpolated into the shell script text.
-    env:
-      DIRECTION: ${{ inputs.direction }}
-      SOURCE_OVERRIDE: ${{ inputs.source }}
-      TARGET_OVERRIDE: ${{ inputs.target }}
-      DRY_RUN: ${{ inputs.dry_run }}
+    outputs:
+      pushed: ${{ steps.merge.outputs.pushed }}
 
     steps:
-      - name: Set up Git
-        run: |
-          git config --global user.name "github-actions[bot]"
-          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+    - name: Set up Git
+      run: |
+        git config --global user.name "github-actions[bot]"
+        git config --global user.email "github-actions[bot]@users.noreply.github.com"
 
-      - name: Checkout repository
-        uses: actions/checkout@v7.0.1
-        with:
-          fetch-depth: 0
+    - name: Checkout repository
+      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      with:
+        fetch-depth: 0
 
-      - name: Resolve and validate branches
-        run: |
-          set -euo pipefail
+    - name: Merge source branch into target
+      id: merge
+      run: |
+        set -e
+        echo "pushed=false" >> "$GITHUB_OUTPUT"
 
-          is_valid_branch_name() {
-            # Restrict to safe ref name characters; blocks shell metacharacters.
-            [[ "$1" =~ ^[A-Za-z0-9._/-]+$ ]]
-          }
+        # Caller must prepare the target branch before invoking this workflow
+        # (e.g. reset sync/main-to-stable from stable for the PR flow).
+        git fetch origin "$TARGET_BRANCH:$TARGET_BRANCH"
+        git checkout "$TARGET_BRANCH"
 
-          if [[ -n "${SOURCE_OVERRIDE}" || -n "${TARGET_OVERRIDE}" ]]; then
-            if [[ -z "${SOURCE_OVERRIDE}" || -z "${TARGET_OVERRIDE}" ]]; then
-              echo "Both source and target overrides must be set together for ad-hoc sync."
-              exit 1
-            fi
-            SOURCE_BRANCH="${SOURCE_OVERRIDE}"
-            TARGET_BRANCH="${TARGET_OVERRIDE}"
-            echo "Using ad-hoc overrides: ${SOURCE_BRANCH} -> ${TARGET_BRANCH}"
-          else
-            case "${DIRECTION}" in
-              "main -> stable")
-                SOURCE_BRANCH="main"
-                TARGET_BRANCH="stable"
-                ;;
-              "stable -> v1.x")
-                SOURCE_BRANCH="stable"
-                TARGET_BRANCH="v1.x"
-                ;;
-              *)
-                echo "Invalid direction: '${DIRECTION}' (expected 'main -> stable' or 'stable -> v1.x')"
-                exit 1
-                ;;
-            esac
-            echo "Using preset direction: ${SOURCE_BRANCH} -> ${TARGET_BRANCH}"
+        # Save the target commit before merging so all protected-path restores
+        # reference it explicitly.
+        TARGET_COMMIT=$(git rev-parse HEAD)
+
+        # Fetch and merge source branch
+        git fetch origin "$SOURCE_BRANCH:$SOURCE_BRANCH"
+        merge_status=0
+        git merge --no-commit "origin/$SOURCE_BRANCH" || merge_status=$?
+        # A non-zero exit is acceptable only when Git entered a conflict state
+        # (MERGE_HEAD present).  Any other failure (e.g. unrelated histories) is fatal.
+        if [[ "$merge_status" -ne 0 ]] && ! git rev-parse --verify MERGE_HEAD >/dev/null 2>&1; then
+          echo "Merge failed without entering a conflict state (exit $merge_status)."
+          exit "$merge_status"
+        fi
+
+        #########################################################################
+        # Always keep target branch state for .tekton, opt/manifests, and
+        # opt/manifest-sources.sh (do not propagate those from source).
+        # That keeps operand refs/pins branch-specific:
+        #   main → stable  does not replace stable@sha with main's unpinned refs
+        #   stable → v1.x  does not replace v1.x tag pins with stable@sha
+        # get_all_manifests.sh still merges from source so fetch-script fixes
+        # propagate. Caveats:
+        # - This applies to any source/target pair using this workflow.
+        # - If target does not contain a guarded directory, any merged content
+        #   from source will be removed.
+        # - This guard exists only in this workflow; manual merges can still
+        #   propagate these paths unless handled similarly.
+
+        for DIR in .tekton opt/manifests; do
+          git rm -r -f --cached --ignore-unmatch -- ":/${DIR}"
+          rm -rf -- "$(git rev-parse --show-toplevel)/${DIR}"
+
+          if git rev-parse --verify "${TARGET_COMMIT}:${DIR}" >/dev/null 2>&1; then
+            echo "Keeping target branch version of ${DIR}."
+            git checkout "$TARGET_COMMIT" -- ":/${DIR}"
+            git add -A -- ":/${DIR}"
           fi
+        done
 
-          if ! is_valid_branch_name "${SOURCE_BRANCH}"; then
-            echo "Invalid source branch name: '${SOURCE_BRANCH}'"
-            exit 1
+        # Keep the target operand source map so branch sync does not replace
+        # pins. get_all_manifests.sh still merges from source (script fixes
+        # propagate). If the target does not have this file yet, abort rather
+        # than taking the source-branch maps — add opt/manifest-sources.sh on
+        # stable/v1.x first (with that branch's pins).
+        SOURCES_FILE="opt/manifest-sources.sh"
+        git rm -f --ignore-unmatch -- "${SOURCES_FILE}"
+        if git rev-parse --verify "${TARGET_COMMIT}:${SOURCES_FILE}" >/dev/null 2>&1; then
+          echo "Keeping target branch version of ${SOURCES_FILE}."
+          git checkout "$TARGET_COMMIT" -- "${SOURCES_FILE}"
+          git add -- "${SOURCES_FILE}"
+        else
+          echo "ERROR: ${TARGET_BRANCH} has no ${SOURCES_FILE}; refusing to copy it from ${SOURCE_BRANCH}."
+          echo "Add that file on ${TARGET_BRANCH} with this branch's pins before running sync-branches."
+          exit 1
+        fi
+        #########################################################################
+
+        # Known files to resolve by keeping the target branch version
+        # (typically branch-specific image tags / params).
+        FILES=(
+          "charts/operator/params.env"
+        )
+        for FILE in "${FILES[@]}"; do
+          if git cat-file -e "${TARGET_COMMIT}:${FILE}" 2>/dev/null; then
+            echo "Keeping target branch version of $FILE."
+            git checkout "$TARGET_COMMIT" -- "$FILE"
+            git add "$FILE"
           fi
-          if ! is_valid_branch_name "${TARGET_BRANCH}"; then
-            echo "Invalid target branch name: '${TARGET_BRANCH}'"
-            exit 1
-          fi
-          if [[ "${SOURCE_BRANCH}" == "${TARGET_BRANCH}" ]]; then
-            echo "Source and target branches must differ."
-            exit 1
-          fi
+        done
 
-          {
-            echo "SOURCE_BRANCH=${SOURCE_BRANCH}"
-            echo "TARGET_BRANCH=${TARGET_BRANCH}"
-          } >> "${GITHUB_ENV}"
+        # Check for potential unresolved conflicts
+        if [[ -n "$(git ls-files -u)" ]]; then
+          echo "Unresolved conflicts detected in the following files:"
+          git ls-files -u
+          echo "Aborting merge due to unexpected conflicts."
+          exit 1
+        fi
 
-      - name: Merge source branch into target
-        run: |
-          set -euo pipefail
+        # Commit changes if any.
+        MERGED_COMMIT=$(git rev-parse HEAD)
+        if [[ -n "$(git status --porcelain)" ]]; then
+          git commit -m "Merge $SOURCE_BRANCH into $TARGET_BRANCH with known resolved conflicts"
+          MERGED_COMMIT=$(git rev-parse HEAD)
+        fi
 
-          # Fetch into remote-tracking refs (never update a checked-out local branch).
-          git fetch origin "+refs/heads/${SOURCE_BRANCH}:refs/remotes/origin/${SOURCE_BRANCH}"
-          git fetch origin "+refs/heads/${TARGET_BRANCH}:refs/remotes/origin/${TARGET_BRANCH}"
-          git switch -C "$TARGET_BRANCH" "refs/remotes/origin/${TARGET_BRANCH}"
+        # Skip push when the merged result is identical to the starting target commit.
+        # This can happen when every incoming change affected only protected files.
+        if [[ "$MERGED_COMMIT" = "$TARGET_COMMIT" ]]; then
+          echo "Merged result is identical to target. Nothing to push."
+          exit 0
+        fi
 
-          # Force a merge commit even when source is a fast-forward of target.
-          if ! git merge --no-ff --no-commit "refs/remotes/origin/${SOURCE_BRANCH}"; then
-            if [[ -z "$(git ls-files -u)" ]]; then
-              echo "Merge failed without file conflicts."
-              exit 1
-            fi
-          fi
-
-          #########################################################################
-          # Always keep target branch state for .tekton, opt/manifests, and
-          # opt/manifest-sources.sh (do not propagate those from source).
-          # That keeps operand refs/pins branch-specific:
-          #   main → stable  does not replace stable@sha with main's unpinned refs
-          #   stable → v1.x  does not replace v1.x tag pins with stable@sha
-          # get_all_manifests.sh still merges from source so fetch-script fixes
-          # propagate. Caveats:
-          # - This applies to any source/target pair using this workflow.
-          # - If target does not contain a guarded directory, any merged content
-          #   from source will be removed.
-          # - This guard exists only in this workflow; manual merges can still
-          #   propagate these paths unless handled similarly.
-
-          for DIR in .tekton opt/manifests; do
-            git rm -r -f --cached --ignore-unmatch -- ":/$(echo "${DIR}")"
-            rm -rf -- "$(git rev-parse --show-toplevel)/${DIR}"
-
-            if git rev-parse --verify "HEAD:${DIR}" >/dev/null 2>&1; then
-              echo "Keeping target branch version of ${DIR}."
-              git checkout HEAD -- ":/$(echo "${DIR}")"
-              git add -A -- ":/$(echo "${DIR}")"
-            fi
-          done
-
-          # Keep the target operand source map so branch sync does not replace
-          # pins. get_all_manifests.sh still merges from source (script fixes
-          # propagate). If the target does not have this file yet, abort rather
-          # than taking the source-branch maps — add opt/manifest-sources.sh on
-          # stable/v1.x first (with that branch's pins).
-          SOURCES_FILE="opt/manifest-sources.sh"
-          git rm -f --ignore-unmatch -- "${SOURCES_FILE}"
-          if git rev-parse --verify "HEAD:${SOURCES_FILE}" >/dev/null 2>&1; then
-            echo "Keeping target branch version of ${SOURCES_FILE}."
-            git checkout HEAD -- "${SOURCES_FILE}"
-            git add -- "${SOURCES_FILE}"
-          else
-            echo "ERROR: ${TARGET_BRANCH} has no ${SOURCES_FILE}; refusing to copy it from ${SOURCE_BRANCH}."
-            echo "Add that file on ${TARGET_BRANCH} with this branch's pins before running sync-branches."
-            exit 1
-          fi
-          #########################################################################
-
-          # Known files to resolve conflicts by keeping the target branch version
-          # (typically branch-specific image tags / params).
-          FILES=(
-            "charts/operator/params.env"
-          )
-
-          # Resolve only genuine unmerged conflicts for known files
-          for FILE in "${FILES[@]}"; do
-            if [[ -n "$(git ls-files -u -- "$FILE")" ]]; then
-              echo "Resolving conflict for $FILE by keeping target branch version."
-              if git cat-file -e "HEAD:$FILE" 2>/dev/null; then
-                git checkout HEAD -- "$FILE"
-                git add -- "$FILE"
-              else
-                git rm -f --ignore-unmatch -- "$FILE"
-              fi
-            fi
-          done
-
-          # Check for potential unresolved conflicts
-          if [[ -n "$(git ls-files -u)" ]]; then
-            echo "Unresolved conflicts detected in the following files:"
-            git ls-files -u
-            echo "Aborting merge due to unexpected conflicts."
-            exit 1
-          fi
-
-          # Commit when a merge is in progress (including empty fast-forward cases).
-          if git rev-parse --verify -q MERGE_HEAD >/dev/null; then
-            git commit -m "Merge ${SOURCE_BRANCH} into ${TARGET_BRANCH} with known resolved conflicts"
-          else
-            echo "No merge in progress. Nothing to push."
-            exit 0
-          fi
-
-          echo "Merge commit ready:"
-          git log -1 --stat
-          git status --short --branch
-
-          if [[ "${DRY_RUN}" == "true" ]]; then
-            echo "Dry run enabled — skipping push to origin/${TARGET_BRANCH}."
-            exit 0
-          fi
-
-          # Push changes directly to target branch
-          git push origin "refs/heads/${TARGET_BRANCH}"
+        git push origin "$TARGET_BRANCH"
+        echo "pushed=true" >> "$GITHUB_OUTPUT"

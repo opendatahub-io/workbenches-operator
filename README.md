@@ -71,11 +71,11 @@ make manifests-fetch ODH_PLATFORM_TYPE=rhoai      # RHOAI / downstream
 
 Do not edit files under `opt/manifests/` manually. After fetching, inspect the tree, run `make test`, then commit both `opt/manifest-sources.sh` (if sources changed) and `opt/manifests/`.
 
-A scheduled GitHub Action ([`.github/workflows/manifests-sync-main.yaml`](.github/workflows/manifests-sync-main.yaml)) runs daily against `main`, refreshes **ODH** manifests, validates rendering with `TestRenderRealManifests`, and opens/updates a PR when content changes. Pushes to `stable` and `v1.x` (and a daily schedule for `stable`) run [`.github/workflows/manifests-sync-stable.yaml`](.github/workflows/manifests-sync-stable.yaml), which commits fetched manifests directly (`stable` also bumps ODH `branch@sha` pins in `opt/manifest-sources.sh` first; `v1.x` keeps tag pins). Operand refs live in `opt/manifest-sources.sh` and are kept on the target branch by [`.github/workflows/sync-branches.yaml`](.github/workflows/sync-branches.yaml). See [`opt/README.md`](opt/README.md) and [`DEPENDENCIES.md`](DEPENDENCIES.md).
+A scheduled GitHub Action ([`.github/workflows/manifests-sync-main.yaml`](.github/workflows/manifests-sync-main.yaml)) runs daily against `main`, refreshes **ODH** manifests, validates rendering with `TestRenderRealManifests`, and opens/updates a PR when content changes. Pushes to `stable` and `v1.x` (and a daily schedule for `stable`) run [`.github/workflows/manifests-sync-stable.yaml`](.github/workflows/manifests-sync-stable.yaml), which commits fetched manifests directly (`stable` also bumps ODH `branch@sha` pins in `opt/manifest-sources.sh` first; `v1.x` keeps tag pins). Operand refs live in `opt/manifest-sources.sh` and are kept on the target branch by [`.github/workflows/sync-branches.yaml`](.github/workflows/sync-branches.yaml). Scheduled branch sync opens PRs via [`.github/workflows/sync-main-to-stable.yaml`](.github/workflows/sync-main-to-stable.yaml) and [`.github/workflows/sync-stable-to-v1.x.yaml`](.github/workflows/sync-stable-to-v1.x.yaml) (same pattern as [opendatahub-io/kubeflow](https://github.com/opendatahub-io/kubeflow)). See [`opt/README.md`](opt/README.md) and [`DEPENDENCIES.md`](DEPENDENCIES.md).
 
 Downstream (`red-hat-data-services/workbenches-operator`) release branches are refreshed separately by the rhods-devops-infra modular-operator manifest sync. That job does not update RHDS `main`. See [DEPENDENCIES.md](DEPENDENCIES.md#upgrading-upstream-manifests) and [`opt/README.md`](opt/README.md).
 
-The main sync workflow needs permission to open PRs: enable **Settings → Actions → General → Allow GitHub Actions to create and approve pull requests**, or configure a fine-grained personal access token (scoped to this repository with `contents: write` and `pull_requests: write`) as a repository secret. Direct commits on `stable`/`v1.x` also require those branches to allow GitHub Actions to push (or the PAT to bypass branch protection).
+Manifest and branch sync need permission to open PRs: enable **Settings → Actions → General → Allow GitHub Actions to create and approve pull requests**, or configure repository secrets. Branch sync PRs require `GHA_SECRET_PAT` (PAT with `contents` + `pull-requests` so `pull_request` CI runs). Direct commits on `stable`/`v1.x` also require those branches to allow GitHub Actions to push (or the PAT to bypass branch protection).
 
 Override individual sources:
 
@@ -405,7 +405,10 @@ Most workflows run on pushes and PRs to `main`, `stable`, and `v1.x`. Manifest s
 | [`go-directive-updater.yaml`](.github/workflows/go-directive-updater.yaml) | Weekly Go patch version bumps |
 | [`manifests-sync-main.yaml`](.github/workflows/manifests-sync-main.yaml) | Daily upstream manifest sync PRs against `main` |
 | [`manifests-sync-stable.yaml`](.github/workflows/manifests-sync-stable.yaml) | On push to `stable`/`v1.x` (daily on `stable`): commit manifests directly (SHA pin bump on `stable` only) |
-| [`sync-branches.yaml`](.github/workflows/sync-branches.yaml) | Manual/workflow_call branch sync (`main→stable`, `stable→v1.x`); keeps target `opt/manifests`, `opt/manifest-sources.sh`, and `.tekton` |
+| [`sync-branches.yaml`](.github/workflows/sync-branches.yaml) | Reusable merge engine (source→target); keeps target `opt/manifests`, `opt/manifest-sources.sh`, and `.tekton` |
+| [`sync-via-pr.yaml`](.github/workflows/sync-via-pr.yaml) | Reusable PR-based sync used by the scheduled wrappers |
+| [`sync-main-to-stable.yaml`](.github/workflows/sync-main-to-stable.yaml) | Daily (06:00 UTC) PR sync of `main` → `stable` |
+| [`sync-stable-to-v1.x.yaml`](.github/workflows/sync-stable-to-v1.x.yaml) | Daily (08:00 UTC) PR sync of `stable` → `v1.x` |
 | [`tls-lint.yml`](.github/workflows/tls-lint.yml) | TLS configuration lint with SARIF upload |
 | [`semgrep-tls.yml`](.github/workflows/semgrep-tls.yml) | Semgrep TLS compliance rules on PRs |
 

@@ -55,7 +55,6 @@ jobs:
     with:
       source: main
       target: stable
-      dry_run: false
 
   sync-stable-to-release:
     name: Sync stable to v1.x
@@ -67,7 +66,6 @@ jobs:
     with:
       source: stable
       target: v1.x
-      dry_run: false
 
   push-branch:
     name: Promote image and push release branch
