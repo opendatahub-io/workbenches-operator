@@ -1,0 +1,49 @@
+# API contract compatibility checks (CRD-only repository).
+# See https://github.com/red-hat-data-services/api-contract-tests and RHOAIENG-103192.
+name: API contract checks
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  crd-contract:
+    # Static CRD compatibility check for the Workbenches CRD.
+    name: CRD compatibility (config/crd/bases)
+    uses: red-hat-data-services/api-contract-tests/.github/workflows/provider-crd-check.yml@latest
+    with:
+      crd-glob: config/crd/bases/*.yaml
+      # Baseline exception: v1.3.0 (e30512e3cc033f29c9e322bbff9610ceecfa3259, the newest
+      # GA release tag) shipped spec/status.ingressContract, removed 5 days after the
+      # release by #318 (RHOAIENG-102011, intentional, coordinated with the orchestrator
+      # as the only writer). Baseline moved to the removal commit so the check protects
+      # the current CRD shape from day one. Approval: RHOAIENG-103192.
+      baseline-refs: 04432cd31b66335926e9e254e9f47f9043faffa1
+      mode: enforce
+
+  coverage:
+    # Fails when a CRD manifest exists that the crd-contract job neither checks nor excludes.
+    name: CRD contract coverage
+    uses: red-hat-data-services/api-contract-tests/.github/workflows/provider-coverage-check.yml@latest
+    with:
+      crd-globs: config/crd/bases/*.yaml
+      # Excluded CRD manifests, with reasons:
+      # - charts/operator/crd/** — Helm chart copy of the canonical CRD, kept identical by
+      #   `make chart-sync` (CI verifies the sync).
+      # - internal/webhook/hardwareprofile/integration/testdata/** — test fixture for a CRD
+      #   owned by opendatahub-operator (HardwareProfile), not a contract of this repo.
+      # - tests/e2e/kind/** — same HardwareProfile fixture, installed for e2e tests.
+      # - opt/manifests/** — vendored operand manifests owned by kubeflow.org /
+      #   gateway.networking.k8s.io / opendatahub.io projects; synced by get_all_manifests.sh,
+      #   not hand-edited here.
+      crd-exclude-globs: >-
+        charts/operator/crd/**
+        internal/webhook/hardwareprofile/integration/testdata/**
+        tests/e2e/kind/**
+        opt/manifests/**
+      baseline-refs: 04432cd31b66335926e9e254e9f47f9043faffa1
+      yq-version: "4.54.1"
+      mode: enforce
