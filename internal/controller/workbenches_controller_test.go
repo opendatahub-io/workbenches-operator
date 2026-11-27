@@ -1224,7 +1224,7 @@ resources:
 	Context("When a reconcile operation fails", func() {
 		It("Should report a PlatformConfig read failure without provisioning", func() {
 			wb := createWorkbenches("Managed", "", "OpenDataHub")
-			DeferCleanup(cleanupWorkbenches, wb)
+			DeferCleanup(func() { cleanupWorkbenches(wb) })
 
 			readErr := errors.New("platform config unavailable")
 			platformConfigKey := client.ObjectKey{Namespace: applicationsNamespace, Name: platformconfig.ConfigMapName}
