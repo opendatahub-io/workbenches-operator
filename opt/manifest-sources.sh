@@ -18,7 +18,7 @@ declare -A ODH_COMPONENT_MANIFESTS=(
     ["workbenches/odh-notebook-controller"]="opendatahub-io:kubeflow:stable@905c3ff9beb33e40e22ba6a617ada5e4813d0f0d:components/odh-notebook-controller/config"
     # notebooks stable is no longer updated. Track main@sha; the stable sync
     # bump job advances this pin to the current main HEAD.
-    ["workbenches/notebooks"]="opendatahub-io:notebooks:main@6ff890ccfb31db29ef8d4a1449c5d4237671dd3b:manifests"
+    ["workbenches/notebooks"]="opendatahub-io:notebooks:main@2ebde84733b454512f782c8e52893467373fc9f0:manifests"
     ["workbenches/workspaces-controller"]="opendatahub-io:workbenches:stable@478fee0f74c3da5c02a5c0f051df1ae196941a87:workspaces/controller/manifests/kustomize"
 )
 
